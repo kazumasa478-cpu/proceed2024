@@ -51,7 +51,10 @@ SEOに強いブログ記事を書いて。
     ]
   });
 
-  const article = msg.content[0].text;
+  const article = msg.content[0].text
+    .replace(/^```html\s*/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
 
   console.log("記事生成完了");
 
@@ -65,18 +68,11 @@ SEOに強いブログ記事を書いて。
     size: "1536x1024",
   });
 
-  const imageUrl = imageRes.data[0].url;
-
-  const imageData = await axios.get(imageUrl, {
-    responseType: "arraybuffer",
-  });
+  const imageB64 = imageRes.data[0].b64_json;
+  const imageBuffer = Buffer.from(imageB64, "base64");
 
   fs.mkdirSync("./images", { recursive: true });
-
-  fs.writeFileSync(
-    "./images/thumbnail.png",
-    imageData.data
-  );
+  fs.writeFileSync("./images/thumbnail.png", imageBuffer);
 
   console.log("画像生成完了");
 
@@ -120,7 +116,7 @@ SEOに強いブログ記事を書いて。
     {
       title: keyword,
       content: article,
-      status: "publish",
+      status: "draft",
       featured_media: mediaId,
     },
     {
@@ -135,14 +131,13 @@ SEOに強いブログ記事を書いて。
   console.log("WordPress投稿完了");
 
   // =====================
-  // X投稿
+  // X投稿（一旦オフ）
   // =====================
 
-  await twitterClient.v2.tweet(
-    `新記事公開\n${keyword}\n${postUrl}`
-  );
-
-  console.log("X投稿完了");
+  // await twitterClient.v2.tweet(
+  //   `新記事公開\n${keyword}\n${postUrl}`
+  // );
+  // console.log("X投稿完了");
 }
 
 run();
