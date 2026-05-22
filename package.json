@@ -16,6 +16,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
     "axios": "^1.16.1",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "openai": "^6.39.0",
+    "twitter-api-v2": "^1.29.0"
   }
 }
