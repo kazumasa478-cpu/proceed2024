@@ -10,8 +10,8 @@ const token = Buffer.from(`${username}:${password}`).toString("base64");
 
 async function generateArticle(keyword) {
   const message = await client.messages.create({
-    model: "claude-opus-4-7",
-    max_tokens: 2048,
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 4096,
     messages: [
       {
         role: "user",
@@ -19,19 +19,26 @@ async function generateArticle(keyword) {
 
 キーワード: ${keyword}
 
-出力形式（JSONで返してください）:
-{
-  "title": "記事タイトル",
-  "content": "HTML形式の記事本文（h2/h3/p タグを使用）"
-}
-
-JSONのみ返してください。余分なテキストは不要です。`,
+以下の形式で必ず出力してください（JSONのみ、余分なテキスト不要）:
+{"title":"記事タイトル","content":"HTML形式の記事本文（h2/h3/pタグ使用、改行は\\nではなくHTMLタグで表現）"}`,
       },
     ],
   });
 
   const text = message.content[0].text.trim();
-  const json = text.replace(/^```json\n?/, "").replace(/\n?```$/, "");
+  const json = text.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+
+  // titleとcontentを個別に抽出してJSON解析エラーを回避
+  const titleMatch = json.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  const contentMatch = json.match(/"content"\s*:\s*"([\s\S]*)"\s*\}?\s*$/);
+
+  if (titleMatch && contentMatch) {
+    return {
+      title: titleMatch[1].replace(/\\n/g, "\n"),
+      content: contentMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'),
+    };
+  }
+
   return JSON.parse(json);
 }
 
