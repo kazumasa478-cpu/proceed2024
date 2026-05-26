@@ -63,9 +63,9 @@ SEOに強いブログ記事を書いて。
   // =====================
 
   const imageRes = await openai.images.generate({
-    model: "dall-e-3",
+    model: "dall-e-2",
     prompt: `${keyword}のブログ用アイキャッチ画像`,
-    size: "1792x1024",
+    size: "1024x1024",
   });
 
   const imageUrl = imageRes.data[0].url;
