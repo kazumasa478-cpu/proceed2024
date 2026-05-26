@@ -63,16 +63,19 @@ SEOに強いブログ記事を書いて。
   // =====================
 
   const imageRes = await openai.images.generate({
-    model: "gpt-image-1",
+    model: "dall-e-3",
     prompt: `${keyword}のブログ用アイキャッチ画像`,
-    size: "1536x1024",
+    size: "1792x1024",
   });
 
-  const imageB64 = imageRes.data[0].b64_json;
-  const imageBuffer = Buffer.from(imageB64, "base64");
+  const imageUrl = imageRes.data[0].url;
+
+  const imageData = await axios.get(imageUrl, {
+    responseType: "arraybuffer",
+  });
 
   fs.mkdirSync("./images", { recursive: true });
-  fs.writeFileSync("./images/thumbnail.png", imageBuffer);
+  fs.writeFileSync("./images/thumbnail.png", imageData.data);
 
   console.log("画像生成完了");
 
