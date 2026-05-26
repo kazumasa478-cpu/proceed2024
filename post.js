@@ -59,27 +59,6 @@ SEOに強いブログ記事を書いて。
   console.log("記事生成完了");
 
   // =====================
-  // 画像生成
-  // =====================
-
-  const imageRes = await openai.images.generate({
-    model: "dall-e-2",
-    prompt: `${keyword}のブログ用アイキャッチ画像`,
-    size: "1024x1024",
-  });
-
-  const imageUrl = imageRes.data[0].url;
-
-  const imageData = await axios.get(imageUrl, {
-    responseType: "arraybuffer",
-  });
-
-  fs.mkdirSync("./images", { recursive: true });
-  fs.writeFileSync("./images/thumbnail.png", imageData.data);
-
-  console.log("画像生成完了");
-
-  // =====================
   // WordPress認証
   // =====================
 
@@ -90,38 +69,57 @@ SEOに強いブログ記事を書いて。
     .toString("base64");
 
   // =====================
-  // 画像アップロード
+  // 画像生成（失敗してもスキップ）
   // =====================
 
-  const mediaRes = await axios.post(
-    `${process.env.WP_URL}/wp-json/wp/v2/media`,
-    fs.readFileSync("./images/thumbnail.png"),
-    {
-      headers: {
-        Authorization: `Basic ${token}`,
-        "Content-Type": "image/png",
-        "Content-Disposition":
-          'attachment; filename="thumbnail.png"',
-      },
-    }
-  );
+  let mediaId = null;
 
-  const mediaId = mediaRes.data.id;
+  try {
+    const imageRes = await openai.images.generate({
+      model: "dall-e-3",
+      prompt: `${keyword}のブログ用アイキャッチ画像`,
+      size: "1792x1024",
+    });
 
-  console.log("画像アップロード完了");
+    const imageUrl = imageRes.data[0].url;
+    const imageData = await axios.get(imageUrl, { responseType: "arraybuffer" });
+
+    fs.mkdirSync("./images", { recursive: true });
+    fs.writeFileSync("./images/thumbnail.png", imageData.data);
+
+    const mediaRes = await axios.post(
+      `${process.env.WP_URL}/wp-json/wp/v2/media`,
+      fs.readFileSync("./images/thumbnail.png"),
+      {
+        headers: {
+          Authorization: `Basic ${token}`,
+          "Content-Type": "image/png",
+          "Content-Disposition": 'attachment; filename="thumbnail.png"',
+        },
+      }
+    );
+
+    mediaId = mediaRes.data.id;
+    console.log("画像生成・アップロード完了");
+
+  } catch (e) {
+    console.log("画像生成スキップ:", e.message);
+  }
 
   // =====================
   // WordPress投稿
   // =====================
 
+  const postBody = {
+    title: keyword,
+    content: article,
+    status: "draft",
+  };
+  if (mediaId) postBody.featured_media = mediaId;
+
   const postRes = await axios.post(
     `${process.env.WP_URL}/wp-json/wp/v2/posts`,
-    {
-      title: keyword,
-      content: article,
-      status: "draft",
-      featured_media: mediaId,
-    },
+    postBody,
     {
       headers: {
         Authorization: `Basic ${token}`,
