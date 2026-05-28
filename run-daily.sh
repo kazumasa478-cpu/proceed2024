@@ -1,12 +1,18 @@
 #!/bin/bash
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/node22/bin:/usr/bin:/bin:$PATH"
+
 cd "$(dirname "$0")"
 
 INDEX_FILE="./index.txt"
 KEYWORDS_FILE="./keywords.txt"
 
-# キーワード一覧を配列に読み込む
-mapfile -t keywords < "$KEYWORDS_FILE"
+# キーワード一覧を配列に読み込む（macOS bash互換）
+keywords=()
+while IFS= read -r line || [ -n "$line" ]; do
+  [ -n "$line" ] && keywords+=("$line")
+done < "$KEYWORDS_FILE"
+
 total=${#keywords[@]}
 
 # 今日のインデックスを読み込む（なければ0）
