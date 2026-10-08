@@ -1,0 +1,33 @@
+{
+  "roster": "名簿.csv",
+  "input_dir": "inbox",
+  "output_dir": "output",
+  "processed_dir": "processed",
+  "forms_dir": "調査票",
+  "move_after_processing": true,
+  "summary_excel": "ストレスチェック集計.xlsx",
+
+  "criteria": {
+    "_説明": "厚労省マニュアルの合計点数方式（評価基準の設定例）。b_only: Bが何点以上で該当 / ac・b_with_ac: A+Cがac点以上かつBがb_with_ac点以上で該当",
+    "b_only": 77,
+    "ac": 76,
+    "b_with_ac": 63
+  },
+  "scale_thresholds": {"good": 2.0, "caution": 3.0},
+
+  "omr": {
+    "_説明": "読取の感度。ink_threshold: 黒とみなす濃さ(0-255) / min_mark_percent: これ未満は未記入 / sure_mark_percent: これ未満は要確認",
+    "ink_threshold": 110,
+    "min_mark_percent": 2.0,
+    "sure_mark_percent": 3.0,
+    "ambiguous_ratio": 0.5
+  },
+
+  "report": {
+    "title": "ストレスチェック結果のお知らせ",
+    "exam_name": "2026年度 ストレスチェック",
+    "implementer": "実施者：〇〇クリニック 産業医 〇〇 〇〇",
+    "contact": "相談窓口：〇〇部 健康管理担当（内線 0000）",
+    "interview_request": "申出先：〇〇部 健康管理担当（内線 0000）"
+  }
+}

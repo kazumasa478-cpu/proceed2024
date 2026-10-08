@@ -1,0 +1,7 @@
+pypdf>=4.0
+pypdfium2>=4.0
+reportlab>=4.0
+opencv-python-headless>=4.8
+numpy>=1.26
+Pillow>=10.0
+openpyxl>=3.1

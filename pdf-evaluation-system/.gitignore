@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+inbox/
+output/
+processed/
+logs/
+dist/
+wheels/
+名簿.csv
+調査票/
+sample/正解.json
