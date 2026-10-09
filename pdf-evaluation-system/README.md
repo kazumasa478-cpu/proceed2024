@@ -36,9 +36,9 @@
 
 ## 移設（インストール）手順
 
-1. `pdf-evaluation-system-1.0.0.zip` を任意の場所（例：`C:\stresscheck`）に展開
-2. `setup.bat` をダブルクリック（初回のみ。ネット接続が必要。
-   オフライン版 zip の場合はライブラリ同梱のためネット不要）
+1. Windows用 `pdf-evaluation-system-1.0.0-win-offline.zip` を任意の場所（例：`C:\stresscheck`）に展開
+2. `setup.bat` をダブルクリック（初回のみ。ライブラリ同梱のためネット接続は不要。
+   Python 3.12 または 3.13 を使ってください）
 3. `名簿.csv` を編集（Excelで開いて保存してOK）
 
    | ID | 氏名 | 所属 |
@@ -46,6 +46,34 @@
    | E0001 | 山田 太郎 | 営業部 |
 
 4. `config.json` の `report` 欄に、実施者名・相談窓口・面接指導の申出先・実施名を記入
+
+## Macで使う場合
+
+Mac用パッケージ（`pdf-evaluation-system-1.0.0-mac-offline.zip`）を使います。
+ライブラリを同梱しているので、**Pythonさえ入っていればネット接続なしで**セットアップできます
+（Apple Silicon〔M1〜M4〕・Intel 両対応。Intel Mac は macOS 14 以降）。
+
+1. **Python を入れる（初回のみ）**：https://www.python.org/downloads/macos/ から
+   「macOS 64-bit universal2 installer」（3.12 または 3.13）をダウンロードしてインストール
+   （ネットのないMacには、別のPCでダウンロードしたインストーラをUSB等で持ち込む）
+2. zip をダブルクリックして展開
+3. **最初の1回だけ**「ターミナル」を開いて次を実行（ネットから来たファイルの実行ブロックを解除）
+   ```
+   xattr -dr com.apple.quarantine （展開したフォルダをここにドラッグ＆ドロップ）
+   ```
+   ※ 代わりに、各 `.command` を **右クリック →「開く」→「開く」** でも実行できます。
+4. `setup.command` をダブルクリック
+5. `動作確認.command` をダブルクリック → 架空の4名分で、調査票作成 → 模擬スキャン → 読取 → 結果通知書・集計Excel までを一通り試せます
+   （結果は `動作確認_結果/output` に作られ、本番データには触れません）
+
+Windows の `.bat` の代わりに、Mac では次の `.command` を使います。
+
+| Windows | Mac |
+|---|---|
+| `setup.bat` | `setup.command` |
+| `make_forms.bat` | `make_forms.command` |
+| `run.bat` | `run.command` |
+| － | `動作確認.command`（サンプルで試す） |
 
 ## 使い方
 
@@ -91,7 +119,8 @@ python -m pdfeval run               # 読取・集計
 python sample/simulate_scan.py      # 手書き風○付きの模擬スキャンPDFを inbox/ に作成（動作確認用）
 python -m unittest discover tests   # テスト
 python build_package.py             # 移設用zip（通常版）
-python build_package.py --offline win --python-version 3.12   # Windows向けオフライン版
+python build_package.py --os win --offline win   # Windows用オフライン版
+python build_package.py --os mac --offline mac   # Mac用オフライン版（Apple Silicon/Intel）
 ```
 
 | ファイル | 役割 |
