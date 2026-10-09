@@ -103,7 +103,7 @@ run_pdfeval() {  # run_pdfeval 説明 引数...
   out=$("$PY" -m pdfeval "$@" --config "$BASE/config.json" --base "$BASE" 2>&1)
   status=$?
   echo "$out" >>"$LOG"
-  SUMMARY=$(echo "$out" | sed -E 's/^[0-9-]+ [0-9:,]+ \[(INFO|WARNING|ERROR)\] //' | grep -E '集計:|印刷用:|未作成|未提出|読み取れません|ありません|名簿|調査票を作成|名分|重複' | tail -8)
+  SUMMARY=$(echo "$out" | sed -E 's/^[0-9-]+ [0-9:,]+ \[(INFO|WARNING|ERROR)\] //' | grep -E '集計:|印刷用:|未作成|未提出|読み取れません|見つかりません|ありません|名簿|調査票を作成|名分|重複' | tail -8)
   return $status
 }
 

@@ -41,6 +41,15 @@ def render_pages(pdf_path) -> list[np.ndarray]:
         doc.close()
 
 
+def _flatten_lighting(gray: np.ndarray) -> np.ndarray:
+    """影や明るさのムラを取り除き、紙の白さをそろえる。"""
+    k = max(15, int(min(gray.shape) / 18)) | 1          # 位置合わせマークより大きい窓
+    bg = cv2.dilate(gray, np.ones((k, k), np.uint8))
+    bg = cv2.GaussianBlur(bg, (0, 0), k / 3)
+    out = gray.astype(np.float32) / np.maximum(bg.astype(np.float32), 1) * 255
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def _find_markers(gray: np.ndarray) -> np.ndarray | None:
     """四隅の黒四角の中心を探す（左上・右上・右下・左下）。"""
     h, w = gray.shape
@@ -83,11 +92,15 @@ def _warp(gray: np.ndarray) -> np.ndarray | None:
 
 
 def _read_qr(img: np.ndarray) -> tuple[str, int] | None:
+    """補正後の画像の右上（QRコードの正しい位置）だけを読む。
+
+    位置を確かめずに読むと、上下逆さの用紙でもQRが読めてしまい、回答を取り違えるため。
+    """
     x, y, s = L.QR_BOX
     pad = 6
     crop = img[int((y - pad) * PX):int((y + s + pad) * PX), int((x - pad) * PX):int((x + s + pad) * PX)]
     detector = cv2.QRCodeDetector()
-    for candidate in (crop, img):
+    for candidate in (crop, cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)):
         text, _, _ = detector.detectAndDecode(candidate)
         if text and (parsed := parse_qr(text)):
             return parsed
@@ -124,10 +137,16 @@ def _read_items(img: np.ndarray, page: L.Page, cfg: dict) -> list[ItemRead]:
 
 def read_page(gray: np.ndarray, source_page: int, cfg: dict) -> PageRead:
     result = PageRead(source_page)
-    for rotated in (gray, cv2.rotate(gray, cv2.ROTATE_180)):   # 上下逆さのスキャンにも対応
+    gray = _flatten_lighting(gray)
+    # 上下逆さ・横向きのスキャンにも対応（QRが正しい位置にある向きを採用する）
+    rotations = (gray, cv2.rotate(gray, cv2.ROTATE_180),
+                 cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE), cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE))
+    markers_found = False
+    for rotated in rotations:
         img = _warp(rotated)
         if img is None:
             continue
+        markers_found = True
         qr = _read_qr(img)
         if qr is None:
             continue
@@ -138,7 +157,10 @@ def read_page(gray: np.ndarray, source_page: int, cfg: dict) -> PageRead:
             return result
         result.items = _read_items(img, page, cfg)
         return result
-    result.error = "位置合わせマークまたはQRコードを読み取れません"
+    result.error = ("QRコードを読み取れません（QRの汚れ・かすれ、または本システムで作成した調査票ではない可能性）"
+                    if markers_found else
+                    "四隅の黒い四角（位置合わせマーク）が見つかりません（用紙の端が切れている、"
+                    "または本システムで作成した調査票ではない可能性）")
     return result
 
 
