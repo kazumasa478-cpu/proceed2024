@@ -210,9 +210,25 @@ OSA
 )
   case "$choice" in
     "$M_RUN")
-      if ! ls "$BASE/inbox/"*.[pP][dD][fF] >/dev/null 2>&1 && [ ! -d "$BASE/output" ]; then
-        b=$(dialog "inbox フォルダにスキャンしたPDFがありません。
-PDFを inbox に入れてから実行してください。" "inboxを開く" "戻る")
+      status_text=$("$PY" -m pdfeval inbox --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+      st=$?
+      if [ $st -eq 3 ]; then
+        b=$(dialog "このアプリに、フォルダの中を見る許可がありません。
+
+$status_text
+
+「システム設定」→「プライバシーとセキュリティ」→「ファイルとフォルダ」で「ストレスチェック」の項目（書類フォルダ、デスクトップフォルダなど）をオンにしてください。
+見つからない場合は「フルディスクアクセス」に「ストレスチェック.app」を追加してオンにしてください。" "設定を開く" "戻る")
+        [ "$b" = "設定を開く" ] && open "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"
+        continue
+      fi
+      if [ $st -ne 0 ] && [ ! -d "$BASE/output" ]; then
+        b=$(dialog "読み取れるスキャンファイルがありません。
+
+$status_text
+
+・このアプリと同じフォルダにある「inbox」に入れてください（別の場所に同じ名前のフォルダがあると、そちらには反応しません）
+・PDF・JPEG・PNG・TIFF に対応しています（フォルダごと入れても大丈夫です）" "inboxを開く" "戻る")
         [ "$b" = "inboxを開く" ] && open "$BASE/inbox"
         continue
       fi

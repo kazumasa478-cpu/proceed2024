@@ -15,7 +15,7 @@ from pathlib import Path
 from . import __version__
 from .excel_report import write_summary
 from .forms import Person, make_forms, read_roster
-from .omr import read_pdf
+from .omr import IMAGE_SUFFIXES, read_pdf
 from .organizer import load_answer_sheet, person_folder, safe_name, save_page_pdf, update_answers
 from .questionnaire import score
 from .report_pdf import combine, write_report
@@ -78,11 +78,59 @@ def _unique(dest: Path) -> Path:
     return candidate
 
 
+SCAN_SUFFIXES = {".pdf"} | IMAGE_SUFFIXES
+
+
+def scan_inbox(inbox: Path) -> tuple[list[Path], list[Path]]:
+    """inbox（サブフォルダも含む）から (読み取れるファイル, 対象外のファイル) を返す。
+
+    フォルダごと入れられた場合や、スキャナが画像(JPEG/PNG/TIFF)で保存した場合にも対応する。
+    権限がなく中を見られないときは PermissionError を送出する。
+    """
+    readable, other = [], []
+    for f in sorted(inbox.rglob("*")):
+        if not f.is_file() or f.name.startswith("."):    # .DS_Store や ._ で始まる隠しファイルは無視
+            continue
+        (readable if f.suffix.lower() in SCAN_SUFFIXES else other).append(f)
+    if not readable and not other:
+        list(inbox.iterdir())   # 空なのか、見る権限がないのかを区別する（権限がなければここで例外）
+    return readable, other
+
+
+def cmd_inbox(base: Path, cfg: dict) -> int:
+    """inbox の中身を表示する。0=読み取れるファイルあり / 2=なし / 3=フォルダを見る権限がない"""
+    inbox = base / cfg["input_dir"]
+    inbox.mkdir(parents=True, exist_ok=True)
+    print(f"場所：{inbox}")
+    try:
+        readable, other = scan_inbox(inbox)
+    except PermissionError:
+        print("このフォルダの中を見る権限がありません。")
+        return 3
+    print(f"読み取れるファイル（PDF・JPEG・PNG・TIFF）：{len(readable)}件")
+    for f in readable[:10]:
+        print(f"　・{f.relative_to(inbox)}")
+    if other:
+        print(f"読み取れない形式のファイル：{len(other)}件")
+        for f in other[:10]:
+            print(f"　・{f.relative_to(inbox)}")
+        if any(f.suffix.lower() in (".heic", ".heif") for f in other):
+            print("※ HEIC（iPhoneの写真）は読めません。スキャンは PDF か JPEG で保存してください。")
+    return 0 if readable else 2
+
+
 def read_inbox(base: Path, cfg: dict, roster: dict[str, Person]) -> int:
     inbox, output = base / cfg["input_dir"], base / cfg["output_dir"]
     inbox.mkdir(parents=True, exist_ok=True)
     errors = 0
-    for pdf in sorted(p for p in inbox.iterdir() if p.suffix.lower() == ".pdf"):
+    try:
+        files, others = scan_inbox(inbox)
+    except PermissionError:
+        log.error("inbox の中を見る権限がありません: %s", inbox)
+        return 1
+    for f in others:
+        log.warning("読み取れない形式のため飛ばしました: %s（PDF・JPEG・PNG・TIFF に対応）", f.relative_to(inbox))
+    for pdf in files:
         try:
             pages = read_pdf(pdf, cfg.get("omr", {}))
         except Exception:
@@ -212,7 +260,7 @@ def cmd_run(base: Path, cfg: dict) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pdfeval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "todo"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "todo", "inbox"])
     parser.add_argument("--config", type=Path, default=BASE_DIR / "config.json")
     parser.add_argument("--base", type=Path, default=None,
                         help="名簿・inbox・output を置く基準フォルダ (既定: 設定ファイルと同じ場所)")
@@ -234,4 +282,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_forms(base, cfg, args.separate)
     if args.command == "todo":
         return cmd_todo(base, cfg, args.tsv)
+    if args.command == "inbox":
+        return cmd_inbox(base, cfg)
     return cmd_run(base, cfg)

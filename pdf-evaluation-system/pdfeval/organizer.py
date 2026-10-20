@@ -45,9 +45,15 @@ class AnswerSheet:
 
 
 def save_page_pdf(source: Path, page_no: int, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if source.suffix.lower() != ".pdf":          # JPEG/PNG/TIFF のスキャンは PDF にして保存
+        from PIL import Image, ImageOps, ImageSequence
+        with Image.open(source) as im:
+            frame = ImageSequence.Iterator(im)[page_no - 1]
+            ImageOps.exif_transpose(frame.copy()).convert("RGB").save(dest, "PDF", resolution=200)
+        return
     writer = PdfWriter()
     writer.add_page(PdfReader(source).pages[page_no - 1])
-    dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as f:
         writer.write(f)
 

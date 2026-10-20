@@ -92,3 +92,53 @@ class EndToEndTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InboxTest(unittest.TestCase):
+    def test_subfolder_jpeg_and_unsupported(self):
+        import io
+        from contextlib import redirect_stdout
+
+        import pypdfium2 as pdfium
+
+        from pdfeval.forms import Person, make_forms
+        from pdfeval.main import cmd_inbox, read_inbox
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            shutil.copy(ROOT / "sample" / "名簿.csv", base / "名簿.csv")
+            pdf = make_forms([Person("E0001", "山田 太郎", "営業部")], base / "forms")[0]
+            sub = base / "inbox" / "スキャン10月"            # フォルダごと入れた場合
+            sub.mkdir(parents=True)
+            shutil.copy(pdf, sub / "scan.pdf")
+            doc = pdfium.PdfDocument(str(pdf))                # 2枚目は JPEG で保存された場合
+            doc[1].render(scale=200 / 72).to_pil().save(base / "inbox" / "IMG_0002.JPG", quality=85)
+            doc.close()
+            (base / "inbox" / "IMG_0003.HEIC").write_bytes(b"x")
+            (base / "inbox" / ".DS_Store").write_bytes(b"x")
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(cmd_inbox(base, CONFIG), 0)
+            text = out.getvalue()
+            self.assertIn("読み取れるファイル（PDF・JPEG・PNG・TIFF）：2件", text)
+            self.assertIn("HEIC", text)
+
+            read_inbox(base, CONFIG, _roster(base, CONFIG))
+            folder = base / "output" / "E0001_山田太郎"
+            self.assertTrue((folder / "調査票スキャン_1枚目.pdf").exists())
+            self.assertTrue((folder / "調査票スキャン_2枚目.pdf").exists())   # JPEG からPDFにして保存
+            self.assertTrue((base / "processed" / "IMG_0002.JPG").exists())
+
+    def test_empty_inbox(self):
+        from pdfeval.main import cmd_inbox
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(cmd_inbox(Path(tmp), CONFIG), 2)
+
+    def test_permission_denied(self):
+        from unittest import mock
+
+        from pdfeval import main as m
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(m, "scan_inbox", side_effect=PermissionError):
+                self.assertEqual(m.cmd_inbox(Path(tmp), CONFIG), 3)
