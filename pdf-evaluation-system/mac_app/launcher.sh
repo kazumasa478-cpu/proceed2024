@@ -64,16 +64,41 @@ end run
 OSA
 }
 
-open_path() {  # ファイルやフォルダを開く。開けなければ理由を表示する
-  local f="$1"
-  open "$f" 2>>"$LOG" && return 0
+open_path() {  # ファイルやフォルダを開く。3通り試し、だめなら理由と開き方を表示する
+  local f="$1" err
+  [ -e "$f" ] || case "$f" in */inbox|*/output|*/調査票) mkdir -p "$f" 2>/dev/null ;; esac
+  err=$(/usr/bin/open "$f" 2>&1) && return 0
+  /usr/bin/open -a Finder "$f" >/dev/null 2>&1 && return 0
   finder_open "$f" && return 0
-  case "$f" in *.csv|*.json|*.txt) open -e "$f" 2>>"$LOG" && return 0 ;; esac
+  echo "open failed: $f : $err" >>"$LOG" 2>/dev/null
+  printf %s "$f" | pbcopy 2>/dev/null
   dialog "開けませんでした：
 $f
 
-このアプリに、このフォルダを使う許可がない可能性があります。アプリを終了して開き直し、案内に従って許可してください。" >/dev/null
+理由：${err:-不明}
+
+【手で開く方法】この場所をコピーしてあります。
+Finder のメニュー「移動」→「フォルダへ移動…」を選び、⌘V で貼り付けて Enter を押してください。" >/dev/null
   return 1
+}
+
+import_scans() {  # ファイル選択画面でスキャンを選び、inbox にコピーする。取り込んだ件数を返す（echo）
+  local list n=0 f
+  list=$(osascript <<'OSA' 2>/dev/null
+set fs to choose file with prompt "取り込むスキャン（PDF・JPEG・PNG・TIFF）を選んでください。⌘キーを押しながらクリックすると複数選べます。" of type {"com.adobe.pdf", "public.jpeg", "public.png", "public.tiff"} with multiple selections allowed
+set out to ""
+repeat with f in fs
+  set out to out & POSIX path of f & linefeed
+end repeat
+return out
+OSA
+)
+  mkdir -p "$BASE/inbox"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if cp "$f" "$BASE/inbox/" 2>>"$LOG"; then n=$((n + 1)); else echo "copy failed: $f" >>"$LOG"; fi
+  done <<< "$list"
+  echo "$n"
 }
 
 # --- 置き場所のチェック ---
@@ -330,15 +355,16 @@ PY
 
 # --- メニュー ---
 M_RUN="スキャンしたPDFを読み取って集計する"
+M_IMPORT="スキャンを選んで取り込み、読み取る"
 M_TODO="要確認の人を確認・修正する"
 M_FORMS="名簿から調査票（印刷用PDF）を作る"
 M_ROSTER="名簿を見る・追加する"
 M_DEMO="動作確認（サンプルで試す）"
 M_CONFIG="設定を開く（実施者名・連絡先など）"
-M_INBOX="スキャンPDFの置き場所（inbox）を開く"
+M_INBOX="inbox フォルダを開く"
 M_OUTPUT="結果フォルダ（output）を開く"
 while true; do
-  choice=$(osascript - "$M_RUN" "$M_TODO" "$M_FORMS" "$M_ROSTER" "$M_DEMO" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
+  choice=$(osascript - "$M_IMPORT" "$M_RUN" "$M_TODO" "$M_FORMS" "$M_ROSTER" "$M_DEMO" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
 on run argv
   set r to choose from list argv with title "ストレスチェック集計システム" with prompt "行う作業を選んで「OK」を押してください。" OK button name "OK" cancel button name "終了" default items {item 1 of argv}
   if r is false then return ""
@@ -346,6 +372,11 @@ on run argv
 end run
 OSA
 )
+  [ "$choice" = "$M_IMPORT" ] && {
+    n=$(import_scans)
+    [ "${n:-0}" -gt 0 ] || { dialog "ファイルが取り込まれませんでした。" >/dev/null; continue; }
+    choice="$M_RUN"
+  }
   case "$choice" in
     "$M_RUN")
       status_text=$(pdfeval inbox 2>>"$LOG")
@@ -360,15 +391,22 @@ $status_text
         [ "$b" = "設定を開く" ] && open "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"
         continue
       fi
-      if [ $st -ne 0 ] && [ ! -d "$BASE/output" ]; then
-        b=$(dialog "読み取れるスキャンファイルがありません。
-
-$status_text
-
-・このアプリと同じフォルダにある「inbox」に入れてください
-・PDF・JPEG・PNG・TIFF に対応しています（フォルダごと入れても大丈夫です）" "inboxを開く" "戻る")
-        [ "$b" = "inboxを開く" ] && open_path "$BASE/inbox"
-        continue
+      if [ $st -ne 0 ]; then
+        if [ -d "$BASE/output" ]; then
+          b=$(dialog "inbox に新しいスキャンはありません。
+新しいスキャンを取り込むか、これまでの回答で集計だけやり直せます。" "ファイルを選ぶ" "集計だけやり直す" "戻る")
+        else
+          b=$(dialog "inbox にスキャンがありません。
+取り込むスキャン（PDF・JPEG・PNG・TIFF）を選んでください。" "ファイルを選ぶ" "戻る")
+        fi
+        [ "$b" = "戻る" ] || [ -z "$b" ] && continue
+      fi
+      if [ $st -ne 0 ] && [ "$b" = "ファイルを選ぶ" ]; then
+        n=$(import_scans)
+        if [ "${n:-0}" -eq 0 ]; then
+          dialog "ファイルが取り込まれませんでした。" >/dev/null
+          continue
+        fi
       fi
       run_pdfeval "読み取り・集計" run
       st=$?
