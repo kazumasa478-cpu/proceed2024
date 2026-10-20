@@ -14,10 +14,11 @@ from pathlib import Path
 
 from . import __version__
 from .excel_report import write_summary
-from .forms import Person, make_forms, read_roster
+from .forms import Person, make_forms, read_roster, valid_id, write_roster
 from .omr import IMAGE_SUFFIXES, read_pdf
-from .organizer import load_answer_sheet, person_folder, safe_name, save_page_pdf, update_answers
-from .questionnaire import score
+from .organizer import (load_answer_sheet, person_folder, safe_name, save_page_pdf, set_answer,
+                        update_answers)
+from .questionnaire import SECTION_BY_KEY, item_label, score
 from .report_pdf import combine, write_report
 
 log = logging.getLogger("pdfeval")
@@ -58,7 +59,77 @@ def _roster(base: Path, cfg: dict) -> dict[str, Person]:
     path = base / cfg["roster"]
     if not path.exists():
         raise SystemExit(f"名簿が見つかりません: {path}（列: ID,氏名,所属 のCSV）")
-    return {p.id: p for p in read_roster(path)}
+    try:
+        return {p.id: p for p in read_roster(path)}
+    except ValueError as e:
+        raise SystemExit(str(e))
+
+
+def cmd_roster(base: Path, cfg: dict, action: str, pid: str, name: str, dept: str) -> int:
+    """名簿の表示・追加・削除（表計算アプリがなくても名簿を扱えるように）。"""
+    path = base / cfg["roster"]
+    people = list(_roster(base, cfg).values()) if path.exists() else []
+    if action == "list":
+        for p in people:
+            print(f"{p.id}\t{p.name}\t{p.dept}")
+        return 0
+    pid = pid.strip()
+    if action == "add":
+        name = name.strip()
+        if not valid_id(pid):
+            print("IDは英数字・ハイフン・アンダーバーで入力してください（例：E0005）")
+            return 1
+        if not name:
+            print("氏名を入力してください")
+            return 1
+        if any(p.id == pid for p in people):
+            print(f"ID {pid} はすでに名簿にあります")
+            return 1
+        people.append(Person(pid, name, dept.strip()))
+        write_roster(path, people)
+        print(f"追加しました：{pid} {name}")
+        return 0
+    if action == "remove":
+        kept = [p for p in people if p.id != pid]
+        if len(kept) == len(people):
+            print(f"ID {pid} は名簿にありません")
+            return 1
+        write_roster(path, kept)
+        print(f"名簿から外しました：{pid}")
+        return 0
+    if action == "fixfile":   # 文字化けしない形式（BOM付きUTF-8）で保存し直す
+        write_roster(path, people)
+        return 0
+    return 1
+
+
+def _sheet_for(base: Path, cfg: dict, pid: str):
+    roster = _roster(base, cfg)
+    for folder, person, sheet in _answer_sheets(base / cfg["output_dir"], roster):
+        if person.id == pid:
+            return folder, person, sheet
+    raise SystemExit(f"ID {pid} の回答が見つかりません")
+
+
+def cmd_items(base: Path, cfg: dict, pid: str) -> int:
+    """未確定の項目を「項目<TAB>質問<TAB>状態<TAB>読取値<TAB>選択肢1|…|4」で出力する（Macアプリ用）。"""
+    from openpyxl import load_workbook
+    folder, person, sheet = _sheet_for(base, cfg, pid)
+    ws = load_workbook(folder / "回答確認.xlsx", data_only=True)["回答"]
+    scores = {r[0]: r[4] for r in ws.iter_rows(min_row=4, values_only=True) if r[0]}
+    for item in sheet.unresolved:
+        opts = "|".join(SECTION_BY_KEY[item[0]].options)
+        print(f"{item}\t{item_label(item)}\t{sheet.statuses.get(item, '未読取')}\t{scores.get(item) or ''}\t{opts}")
+    return 0
+
+
+def cmd_fix(base: Path, cfg: dict, pid: str, item: str, answer: str) -> int:
+    """1項目の回答を確定する（answer は 1〜4、または none=未回答）。"""
+    folder, person, _ = _sheet_for(base, cfg, pid)
+    value = None if answer in ("", "none", "0") else int(answer)
+    set_answer(folder, person, item, value)
+    print(f"{person.id} {item} を {value if value else '未回答'} で確定しました")
+    return 0
 
 
 def cmd_forms(base: Path, cfg: dict, separate: bool) -> int:
@@ -260,12 +331,18 @@ def cmd_run(base: Path, cfg: dict) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pdfeval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "todo", "inbox"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "todo", "inbox", "items", "fix",
+                                 "roster-list", "roster-add", "roster-remove", "roster-fixfile"])
     parser.add_argument("--config", type=Path, default=BASE_DIR / "config.json")
     parser.add_argument("--base", type=Path, default=None,
                         help="名簿・inbox・output を置く基準フォルダ (既定: 設定ファイルと同じ場所)")
     parser.add_argument("--separate", action="store_true", help="forms: 1人1ファイルで出力する")
     parser.add_argument("--tsv", action="store_true", help="todo: 機械向けのタブ区切りで出力する")
+    parser.add_argument("--id", default="", help="items/fix/roster-add/roster-remove: 対象のID")
+    parser.add_argument("--item", default="", help="fix: 項目（例 A5）")
+    parser.add_argument("--answer", default="", help="fix: 回答 1〜4、または none")
+    parser.add_argument("--name", default="", help="roster-add: 氏名")
+    parser.add_argument("--dept", default="", help="roster-add: 所属")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
 
@@ -284,4 +361,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_todo(base, cfg, args.tsv)
     if args.command == "inbox":
         return cmd_inbox(base, cfg)
+    if args.command == "items":
+        return cmd_items(base, cfg, args.id)
+    if args.command == "fix":
+        return cmd_fix(base, cfg, args.id, args.item, args.answer)
+    if args.command.startswith("roster-"):
+        return cmd_roster(base, cfg, args.command[len("roster-"):], args.id, args.name, args.dept)
     return cmd_run(base, cfg)

@@ -228,7 +228,7 @@ def make_icon(path: Path) -> None:
     img.save(path, sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
 
 
-def build_tree(dest: Path, wheels: Path) -> Path:
+def build_tree(dest: Path, wheels: Path | None) -> Path:
     top = dest / FOLDER
     res = top / APP / "Contents" / "Resources"
     macos = top / APP / "Contents" / "MacOS"
@@ -241,7 +241,8 @@ def build_tree(dest: Path, wheels: Path) -> Path:
     for f in ("config.json", "requirements.txt"):
         shutil.copy(ROOT / f, res / f)
     (res / "VERSION").write_text(__version__, encoding="utf-8")
-    shutil.copytree(wheels, res / "wheels")
+    if wheels is not None:      # 更新版は同梱しない（Macに入っているライブラリを使い回す）
+        shutil.copytree(wheels, res / "wheels")
     make_icon(res / "AppIcon.icns")
     (top / "はじめにお読みください.txt").write_text(README, encoding="utf-8")
     return top
@@ -294,8 +295,31 @@ def write_installer(parts: list[Path], out: Path) -> None:
         zf.writestr(info, script.encode("utf-8"))
 
 
+def build_update(out_dir: Path) -> Path:
+    """ライブラリを含まない小さな配布ファイル（1ファイルで送れる大きさ）を作る。
+
+    アプリは初回起動時に、以前の版のライブラリがあれば使い回し、なければインターネットから取り込む。
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"stresscheck_v{__version__}.zip"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        top = build_tree(tmp / "tree", None)
+        zip_tree(top, out)
+        with zipfile.ZipFile(out, "a", zipfile.ZIP_DEFLATED) as zf:
+            info = zipfile.ZipInfo("update.sh", date_time=(2026, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.external_attr = 0o100755 << 16
+            zf.writestr(info, (HERE / "update.sh").read_bytes())
+    return out
+
+
 def main() -> None:
     out_dir = ROOT / "dist" / "mac"
+    if "--update" in sys.argv:
+        out = build_update(out_dir)
+        print(f"作成しました: {out} ({out.stat().st_size / 1024:.0f} KB)")
+        return
     if "--installer-only" in sys.argv:
         # 送付済みの分割ファイル（dist/mac にあるもの）に合わせてインストーラだけ作り直す
         parts = sorted(p for p in out_dir.glob(f"{PART_PREFIX}*") if p.suffix in (".part", ".dat"))

@@ -142,3 +142,66 @@ class InboxTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(m, "scan_inbox", side_effect=PermissionError):
                 self.assertEqual(m.cmd_inbox(Path(tmp), CONFIG), 3)
+
+
+class RosterAndFixTest(unittest.TestCase):
+    def test_roster_encodings_and_bom(self):
+        from pdfeval.forms import Person, read_roster, write_roster
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "名簿.csv"
+            for data in ("ID,氏名,所属\r\nE1,山田 太郎,営業\r\n".encode("cp932"),        # Excel（Shift_JIS）
+                         "ID,氏名,所属\nE1,山田 太郎,営業\n".encode("utf-8-sig"),          # BOM付き
+                         "ID\t氏名\t所属\nE1\t山田 太郎\t営業\n".encode("utf-16")):       # Excel「Unicodeテキスト」
+                p.write_bytes(data)
+                self.assertEqual(read_roster(p), [Person("E1", "山田 太郎", "営業")])
+            write_roster(p, [Person("E1", "山田 太郎", "営業")])
+            self.assertTrue(p.read_bytes().startswith(b"\xef\xbb\xbfID,"))   # Excelでも文字化けしない
+            p.write_text("ID,氏名\nE;1,x\nE2,\n", encoding="utf-8")
+            with self.assertRaises(ValueError) as cm:
+                read_roster(p)
+            self.assertIn("使えない文字", str(cm.exception))
+
+    def test_roster_commands(self):
+        import io
+        from contextlib import redirect_stdout
+
+        from pdfeval.main import cmd_roster
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            shutil.copy(ROOT / "sample" / "名簿.csv", base / "名簿.csv")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cmd_roster(base, CONFIG, "add", "E0009", "新人 花子", "訪問看護"), 0)
+                self.assertEqual(cmd_roster(base, CONFIG, "add", "E0009", "重複", ""), 1)
+                self.assertEqual(cmd_roster(base, CONFIG, "add", "x y", "空白入り", ""), 1)
+                self.assertEqual(cmd_roster(base, CONFIG, "remove", "E0001", "", ""), 0)
+            ids = [p.id for p in _roster(base, CONFIG).values()]
+            self.assertIn("E0009", ids)
+            self.assertNotIn("E0001", ids)
+
+    def test_fix_answer_in_app(self):
+        import io
+        from contextlib import redirect_stdout
+
+        import simulate_scan
+        from pdfeval.main import cmd_fix, list_todo
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "sample").mkdir()
+            shutil.copy(ROOT / "sample" / "名簿.csv", base / "名簿.csv")
+            shutil.copy(ROOT / "sample" / "名簿.csv", base / "sample" / "名簿.csv")
+            orig, simulate_scan.ROOT = simulate_scan.ROOT, base
+            try:
+                simulate_scan.main()
+            finally:
+                simulate_scan.ROOT = orig
+            roster = _roster(base, CONFIG)
+            read_inbox(base, CONFIG, roster)
+            people, _ = list_todo(base, CONFIG, roster)
+            self.assertEqual([p["person"].id for p in people], ["E0003"])
+            with redirect_stdout(io.StringIO()):
+                cmd_fix(base, CONFIG, "E0003", "A5", "2")
+                cmd_fix(base, CONFIG, "E0003", "B2", "none")
+            self.assertEqual(list_todo(base, CONFIG, roster)[0], [])
+            build_outputs(base, CONFIG, roster)
+            self.assertTrue(list((base / "output").glob("E0003_*/結果通知書_*.pdf")))

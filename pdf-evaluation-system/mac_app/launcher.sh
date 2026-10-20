@@ -1,19 +1,22 @@
 #!/bin/bash
 # ストレスチェック.app の本体。ダブルクリックでメニューを表示する。
-#   ・プログラムとライブラリ … アプリの中 (Contents/Resources)
-#   ・Python 仮想環境       … ~/Library/Application Support/ストレスチェック集計システム
-#   ・名簿・設定・入出力    … アプリと同じフォルダ（BtoB フォルダなどに置いた場所）
+#   ・プログラム         … アプリの中 (Contents/Resources)
+#   ・Python とライブラリ … ~/Library/Application Support/ストレスチェック集計システム/venv-…
+#   ・名簿・設定・入出力 … アプリと同じフォルダ
+# 名簿の編集・要確認の修正はアプリの中でできるので、Excel や Numbers がなくても使える。
 APP_NAME="ストレスチェック集計システム"
 CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$(dirname "$CONTENTS")"
 RES="$CONTENTS/Resources"
 BASE="$(dirname "$APP")"
-VERSION="$(cat "$RES/VERSION" 2>/dev/null || echo 1)"
 SUPPORT="$HOME/Library/Application Support/$APP_NAME"
-VENV="$SUPPORT/venv-$VERSION"
 LOG="$BASE/logs/app.log"
 export PYTHONPATH="$RES"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+# ライブラリの組み合わせが同じなら、版が変わっても同じ仮想環境を使い回す
+REQ_ID="$(shasum -a 256 "$RES/requirements.txt" 2>/dev/null | cut -c1-12)"
+VENV="$SUPPORT/venv-$REQ_ID"
+CHECK_IMPORT="import cv2, numpy, PIL, pypdfium2, pypdf, reportlab, openpyxl"
 
 dialog() {  # dialog "本文" [ボタン...]  → 押したボタン名を返す
   local text="$1"; shift
@@ -27,38 +30,79 @@ end run
 OSA
 }
 
+ask_text() {  # ask_text "質問" "初期値" → 入力された文字（キャンセル時は空で終了コード1）
+  osascript - "$1" "$2" <<'OSA' 2>/dev/null
+on run argv
+  set r to display dialog (item 1 of argv) with title "ストレスチェック集計システム" default answer (item 2 of argv) buttons {"キャンセル", "OK"} default button 2 cancel button 1
+  return text returned of r
+end run
+OSA
+}
+
+choose() {  # choose "説明" "OKボタン名" 項目... → 選んだ項目（やめたら空）
+  local prompt="$1" ok="$2"; shift 2
+  osascript - "$prompt" "$ok" "$@" <<'OSA' 2>/dev/null
+on run argv
+  set theItems to items 3 thru -1 of argv
+  set r to choose from list theItems with title "ストレスチェック集計システム" with prompt (item 1 of argv) OK button name (item 2 of argv) cancel button name "戻る"
+  if r is false then return ""
+  return item 1 of r
+end run
+OSA
+}
+
 notify() { osascript -e "display notification \"$1\" with title \"$APP_NAME\"" >/dev/null 2>&1; }
 
-# --- 置き場所のチェック（ダウンロードしたまま開くと、macOSが一時的な場所で起動することがある） ---
+open_path() {  # ファイルやフォルダを開く。開けなければ理由を表示する
+  local f="$1"
+  [ -e "$f" ] || { dialog "見つかりません：
+$f" >/dev/null; return 1; }
+  open "$f" 2>>"$LOG" && return 0
+  case "$f" in *.csv|*.json|*.txt) open -e "$f" 2>>"$LOG" && return 0 ;; esac
+  dialog "開けませんでした（開くためのアプリが入っていない可能性があります）：
+$f" >/dev/null
+  return 1
+}
+
+# --- 置き場所のチェック ---
 case "$APP" in
   */AppTranslocation/*)
     dialog "このアプリは一時的な場所で起動されました。
 
-「$APP_NAME」フォルダを Finder でドラッグして BtoB フォルダなどへ移動してから、もう一度ダブルクリックしてください。"
+「$APP_NAME」フォルダを Finder でドラッグして別の場所（YADOLI訪問看護ステーション のフォルダなど）へ移動してから、もう一度ダブルクリックしてください。" >/dev/null
     exit 0 ;;
 esac
 if [ ! -w "$BASE" ]; then
   dialog "このフォルダには書き込みできません：
 $BASE
 
-書き込みできる場所（BtoB フォルダなど）へ移動してから開いてください。"
+書き込みできる場所へ移動してから開いてください。" >/dev/null
   exit 1
 fi
-# ネットから来たファイルの実行ブロックをフォルダごと解除（2回目以降の確認を出さないため）
 xattr -dr com.apple.quarantine "$BASE" 2>/dev/null
 mkdir -p "$BASE/logs"
 
-# --- 初回準備：Python を探して仮想環境を作り、同梱ライブラリを入れる ---
+# --- Python とライブラリの準備 ---
 find_python() {
   for cand in python3.13 python3.12 python3; do
     for dir in /Library/Frameworks/Python.framework/Versions/Current/bin /opt/homebrew/bin /usr/local/bin /usr/bin; do
       exe="$dir/$cand"
       [ -x "$exe" ] || continue
-      # /usr/bin/python3 はコマンドラインツール未導入だと案内画面が出るだけなので確認してから使う
       if "$exe" -c 'import sys; sys.exit(0 if (3, 12) <= sys.version_info[:2] <= (3, 13) else 1)' >/dev/null 2>&1; then
         echo "$exe"; return 0
       fi
     done
+  done
+  return 1
+}
+
+reuse_existing_venv() {  # 以前の版で作ったライブラリがそのまま使えるなら使う
+  local v
+  for v in "$SUPPORT"/venv-*; do
+    [ -x "$v/bin/python" ] || continue
+    if "$v/bin/python" -c "$CHECK_IMPORT" >/dev/null 2>&1; then
+      VENV="$v"; return 0
+    fi
   done
   return 1
 }
@@ -73,38 +117,156 @@ python.org から「macOS 64-bit universal2 installer」をダウンロードし
     [ "$b" = "ダウンロードページを開く" ] && open "https://www.python.org/downloads/macos/"
     exit 1
   fi
-  notify "初回の準備をしています（1〜2分かかります）"
+  VENV="$SUPPORT/venv-$REQ_ID"
+  if [ -d "$RES/wheels" ]; then
+    notify "初回の準備をしています（1〜2分かかります）"
+    src=(--no-index --find-links "$RES/wheels")
+  else
+    dialog "初回の準備として、必要な部品をインターネットから取り込みます（数分かかります）。
+インターネットにつながった状態で「OK」を押してください。" >/dev/null
+    notify "必要な部品を取り込んでいます…"
+    src=()
+  fi
   {
     echo "=== setup $(date) with $py"
     rm -rf "$VENV"
     mkdir -p "$SUPPORT"
     "$py" -m venv "$VENV" &&
-    "$VENV/bin/python" -m pip install --no-index --find-links "$RES/wheels" -r "$RES/requirements.txt"
+    "$VENV/bin/python" -m pip install --disable-pip-version-check "${src[@]}" -r "$RES/requirements.txt"
   } >>"$LOG" 2>&1
-  if ! "$VENV/bin/python" -c "import cv2, reportlab, openpyxl, pypdfium2" >>"$LOG" 2>&1; then
+  if ! "$VENV/bin/python" -c "$CHECK_IMPORT" >>"$LOG" 2>&1; then
     rm -rf "$VENV"
-    dialog "初回の準備に失敗しました。
-logs/app.log の内容を担当者に送ってください。"
+    dialog "準備に失敗しました。インターネット接続を確認して、もう一度開いてください。
+直らない場合は logs/app.log を担当者に送ってください。" >/dev/null
     exit 1
   fi
 }
-[ -x "$VENV/bin/python" ] || setup
+if ! "$VENV/bin/python" -c "$CHECK_IMPORT" >/dev/null 2>&1; then
+  reuse_existing_venv || setup
+fi
 PY="$VENV/bin/python"
 
-# 名簿・設定がなければ見本をコピー
+pdfeval() { "$PY" -m pdfeval "$@" --config "$BASE/config.json" --base "$BASE"; }
+
+# 名簿・設定がなければ見本をコピー。名簿は文字化けしない形式で保存し直しておく
 [ -f "$BASE/config.json" ] || cp "$RES/config.json" "$BASE/config.json"
 [ -f "$BASE/名簿.csv" ] || cp "$RES/sample/名簿.csv" "$BASE/名簿.csv"
+pdfeval roster-fixfile >>"$LOG" 2>&1
 mkdir -p "$BASE/inbox"
 
-run_pdfeval() {  # run_pdfeval 説明 引数...
+run_pdfeval() {  # run_pdfeval 説明 引数...（結果の要点を SUMMARY に入れる）
   local title="$1"; shift
   notify "$title を実行しています…"
   local out status
-  out=$("$PY" -m pdfeval "$@" --config "$BASE/config.json" --base "$BASE" 2>&1)
+  out=$(pdfeval "$@" 2>&1)
   status=$?
   echo "$out" >>"$LOG"
-  SUMMARY=$(echo "$out" | sed -E 's/^[0-9-]+ [0-9:,]+ \[(INFO|WARNING|ERROR)\] //' | grep -E '集計:|印刷用:|未作成|未提出|読み取れません|見つかりません|ありません|名簿|調査票を作成|名分|重複' | tail -8)
+  SUMMARY=$(echo "$out" | sed -E 's/^[0-9-]+ [0-9:,]+ \[(INFO|WARNING|ERROR)\] //' |
+            grep -E '集計:|印刷用:|未作成|未提出|読み取れません|見つかりません|ありません|名簿|調査票を作成|名分|重複|問題' | tail -8)
   return $status
+}
+
+# --- 名簿 ---
+roster_menu() {
+  while true; do
+    local c
+    c=$(choose "名簿（$(pdfeval roster-list 2>/dev/null | grep -c .)名）" "OK" \
+        "名簿を見る" "名簿に追加する" "名簿から外す" "名簿ファイルを開く（Excel・Numbers など）")
+    case "$c" in
+      "名簿を見る")
+        local list
+        list=$(pdfeval roster-list 2>&1 | awk -F'\t' '{printf "%s　%s　%s\n", $1, $2, $3}')
+        dialog "${list:-（まだ誰も登録されていません）}" >/dev/null ;;
+      "名簿に追加する")
+        local id name dept msg
+        id=$(ask_text "ID（社員番号など。英数字）を入力してください" "") || continue
+        name=$(ask_text "氏名を入力してください" "") || continue
+        dept=$(ask_text "所属を入力してください（空欄でも可）" "") || continue
+        msg=$(pdfeval roster-add --id "$id" --name "$name" --dept "$dept" 2>>"$LOG")
+        dialog "$msg" >/dev/null ;;
+      "名簿から外す")
+        local items=() line pick
+        while IFS= read -r line; do [ -n "$line" ] && items+=("$(echo "$line" | tr '\t' ' ')"); done \
+          < <(pdfeval roster-list 2>/dev/null)
+        [ ${#items[@]} -gt 0 ] || { dialog "名簿に誰もいません。" >/dev/null; continue; }
+        pick=$(choose "名簿から外す人を選んでください" "外す" "${items[@]}")
+        [ -n "$pick" ] || continue
+        [ "$(dialog "「$pick」を名簿から外しますか？" "外す" "やめる")" = "外す" ] || continue
+        dialog "$(pdfeval roster-remove --id "${pick%% *}" 2>>"$LOG")" >/dev/null ;;
+      "名簿ファイルを開く（Excel・Numbers など）")
+        dialog "名簿.csv を開きます。
+・1行目は「ID,氏名,所属」のままにしてください
+・Numbers で直した場合は「ファイル」→「書き出す」→「CSV」で、同じ名前（名簿.csv）に上書きしてください" >/dev/null
+        open_path "$BASE/名簿.csv" ;;
+      *) return ;;
+    esac
+  done
+}
+
+# --- 要確認の人：アプリの中で回答を確定する ---
+fix_person() {  # fix_person ID 表示名 スキャンファイル(|区切り)
+  local pid="$1" label="$2" files="$3" f
+  IFS='|' read -r -a scans <<< "$files"
+  for f in "${scans[@]}"; do [[ "$f" == *.pdf ]] && open "$f" 2>>"$LOG"; done
+  local lines
+  lines=$(pdfeval items --id "$pid" 2>>"$LOG")
+  [ -n "$lines" ] || return 0
+  local item q st sc opts
+  while IFS=$'\t' read -r item q st sc opts; do
+    [ -n "$item" ] || continue
+    IFS='|' read -r -a o <<< "$opts"
+    local reason="$st"
+    [ "$st" = "複数" ] && reason="2つ以上塗られているように見えます"
+    [ "$st" = "未記入" ] && reason="どれも塗られていないように見えます"
+    [ "$st" = "要確認" ] && reason="塗りが薄く、自信がありません"
+    local pick
+    pick=$(choose "$label　$item
+「$q」
+
+読み取り結果：$reason
+開いたスキャン（調査票スキャン_○枚目.pdf）を見て、本人が塗った番号を選んでください。" "確定" \
+      "1：${o[0]}" "2：${o[1]}" "3：${o[2]}" "4：${o[3]}" "未回答（本人が答えていない）" < /dev/null)
+    [ -n "$pick" ] || return 1          # 「戻る」＝続きはあとで
+    local ans="${pick%%：*}"
+    [[ "$ans" =~ ^[1-4]$ ]] || ans="none"
+    pdfeval fix --id "$pid" --item "$item" --answer "$ans" >>"$LOG" 2>&1
+  done <<< "$lines"
+  return 0
+}
+
+todo() {
+  while true; do
+    local lines labels=() files=() kinds=() ids=()
+    lines=$(pdfeval todo --tsv 2>>"$LOG")
+    while IFS=$'\t' read -r kind paths label; do
+      [ -n "$kind" ] || continue
+      kinds+=("$kind"); files+=("$paths"); labels+=("$label"); ids+=("${label%% *}")
+    done <<< "$lines"
+    if [ ${#labels[@]} -eq 0 ]; then
+      dialog "要確認の人はいません。全員の結果通知書を作成できる状態です。" >/dev/null
+      return
+    fi
+    local picked i
+    picked=$(choose "読み取りに自信がない回答が残っている人です。選ぶと、スキャンを見ながら1問ずつ確定できます。" "確認する" "${labels[@]}")
+    [ -n "$picked" ] || return
+    for i in "${!labels[@]}"; do
+      [ "${labels[$i]}" = "$picked" ] || continue
+      if [ "${kinds[$i]}" = "UNREADABLE" ]; then
+        open_path "${files[$i]}"
+        dialog "このページは読み取れませんでした。
+・このアプリで作った調査票か（四隅の黒い四角とQRコードがあるか）
+・用紙の端やQRコードが欠けたり汚れたりしていないか
+を確認し、スキャンし直して inbox に入れてください。" >/dev/null
+        continue 2
+      fi
+      if fix_person "${ids[$i]}" "${labels[$i]%%（*}" "${files[$i]}"; then
+        run_pdfeval "集計" run
+        dialog "${labels[$i]%%（*} さんの確認が終わり、集計し直しました。
+
+$SUMMARY" >/dev/null
+      fi
+    done
+  done
 }
 
 demo() {
@@ -135,72 +297,17 @@ PY
 結果は「動作確認_結果」フォルダにあり、本番のデータには影響しません。" >/dev/null
 }
 
-# --- 要確認の人の一覧 ---
-todo() {
-  while true; do
-    local lines labels=() files=() kinds=()
-    lines=$("$PY" -m pdfeval todo --tsv --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
-    while IFS=$'\t' read -r kind paths label; do
-      [ -n "$kind" ] || continue
-      kinds+=("$kind"); files+=("$paths"); labels+=("$label")
-    done <<< "$lines"
-    if [ ${#labels[@]} -eq 0 ]; then
-      dialog "要確認の人はいません。
-（全員の結果通知書を作成できる状態です）" >/dev/null
-      return
-    fi
-    local picked
-    picked=$(osascript - "${labels[@]}" <<'OSA' 2>/dev/null
-on run argv
-  set r to choose from list argv with title "要確認の人" with prompt "読み取りに自信がない回答が残っている人です。選ぶと「回答確認.xlsx」と調査票のスキャンを開きます。" OK button name "開く" cancel button name "メニューに戻る"
-  if r is false then return ""
-  return item 1 of r
-end run
-OSA
-)
-    [ -n "$picked" ] || return
-    local i
-    for i in "${!labels[@]}"; do
-      [ "${labels[$i]}" = "$picked" ] || continue
-      IFS='|' read -r -a open_files <<< "${files[$i]}"
-      for f in "${open_files[@]}"; do open "$f"; done
-      if [ "${kinds[$i]}" = "UNREADABLE" ]; then
-        dialog "このページは読み取れませんでした。
-
-・本システムで作った調査票か（四隅の黒い四角とQRコードがあるか）
-・用紙の端やQRコードが欠けたり汚れたりしていないか
-
-を確認し、必要ならスキャンし直して inbox に入れてください。" >/dev/null
-        continue 2
-      fi
-      local b
-      b=$(dialog "「回答確認.xlsx」の黄色い行を、スキャンを見ながら直してください。
-・「回答」に 1〜4 を入れ、「状態」を「確認済」にする
-・本人が答えていない項目は、回答を空欄のまま「確認済」にする
-・Numbers の場合は「ファイル」→「書き出す」→「Excel」で、同じ名前に上書き保存
-
-直して保存したら「集計し直す」を押してください。" "集計し直す" "一覧に戻る")
-      if [ "$b" = "集計し直す" ]; then
-        run_pdfeval "集計" run
-        dialog "集計し直しました。
-
-$SUMMARY" >/dev/null
-      fi
-    done
-  done
-}
-
 # --- メニュー ---
 M_RUN="スキャンしたPDFを読み取って集計する"
-M_TODO="要確認の人を確認する"
+M_TODO="要確認の人を確認・修正する"
 M_FORMS="名簿から調査票（印刷用PDF）を作る"
+M_ROSTER="名簿を見る・追加する"
 M_DEMO="動作確認（サンプルで試す）"
-M_ROSTER="名簿を開く（名簿.csv）"
-M_CONFIG="設定を開く（実施者名・相談窓口など）"
+M_CONFIG="設定を開く（実施者名・連絡先など）"
 M_INBOX="スキャンPDFの置き場所（inbox）を開く"
 M_OUTPUT="結果フォルダ（output）を開く"
 while true; do
-  choice=$(osascript - "$M_RUN" "$M_TODO" "$M_FORMS" "$M_DEMO" "$M_ROSTER" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
+  choice=$(osascript - "$M_RUN" "$M_TODO" "$M_FORMS" "$M_ROSTER" "$M_DEMO" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
 on run argv
   set r to choose from list argv with title "ストレスチェック集計システム" with prompt "行う作業を選んで「OK」を押してください。" OK button name "OK" cancel button name "終了" default items {item 1 of argv}
   if r is false then return ""
@@ -210,14 +317,14 @@ OSA
 )
   case "$choice" in
     "$M_RUN")
-      status_text=$("$PY" -m pdfeval inbox --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+      status_text=$(pdfeval inbox 2>>"$LOG")
       st=$?
       if [ $st -eq 3 ]; then
         b=$(dialog "このアプリに、フォルダの中を見る許可がありません。
 
 $status_text
 
-「システム設定」→「プライバシーとセキュリティ」→「ファイルとフォルダ」で「ストレスチェック」の項目（書類フォルダ、デスクトップフォルダなど）をオンにしてください。
+「システム設定」→「プライバシーとセキュリティ」→「ファイルとフォルダ」で「ストレスチェック」の項目をオンにしてください。
 見つからない場合は「フルディスクアクセス」に「ストレスチェック.app」を追加してオンにしてください。" "設定を開く" "戻る")
         [ "$b" = "設定を開く" ] && open "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"
         continue
@@ -227,39 +334,41 @@ $status_text
 
 $status_text
 
-・このアプリと同じフォルダにある「inbox」に入れてください（別の場所に同じ名前のフォルダがあると、そちらには反応しません）
+・このアプリと同じフォルダにある「inbox」に入れてください
 ・PDF・JPEG・PNG・TIFF に対応しています（フォルダごと入れても大丈夫です）" "inboxを開く" "戻る")
-        [ "$b" = "inboxを開く" ] && open "$BASE/inbox"
+        [ "$b" = "inboxを開く" ] && open_path "$BASE/inbox"
         continue
       fi
       run_pdfeval "読み取り・集計" run
       st=$?
-      open "$BASE/output"
+      open "$BASE/output" 2>>"$LOG"
       [ $st -eq 0 ] && head="完了しました。" || head="一部のファイルを読み取れませんでした（output/_読取不可 を確認してください）。"
       dialog "$head
 
 $SUMMARY
 
-要確認の人がいる場合は、メニューの「要確認の人を確認する」から直してください。" >/dev/null ;;
+要確認の人がいる場合は、メニューの「要確認の人を確認・修正する」で直せます。" >/dev/null ;;
+    "$M_TODO") todo ;;
     "$M_FORMS")
       if run_pdfeval "調査票の作成" forms; then
-        open "$BASE/調査票"
+        open "$BASE/調査票" 2>>"$LOG"
         dialog "調査票を作成しました。
 
 $SUMMARY
 
 等倍・片面で印刷してください（「用紙に合わせる」はオフ）。" >/dev/null
       else
-        dialog "調査票を作成できませんでした。名簿.csv（列：ID,氏名,所属）を確認してください。
+        dialog "調査票を作成できませんでした。
 
-$SUMMARY" >/dev/null
+$SUMMARY
+
+メニューの「名簿を見る・追加する」で名簿を確認してください。" >/dev/null
       fi ;;
-    "$M_TODO") todo ;;
+    "$M_ROSTER") roster_menu ;;
     "$M_DEMO") demo ;;
-    "$M_ROSTER") open "$BASE/名簿.csv" ;;
-    "$M_CONFIG") open -e "$BASE/config.json" ;;
-    "$M_INBOX") open "$BASE/inbox" ;;
-    "$M_OUTPUT") mkdir -p "$BASE/output"; open "$BASE/output" ;;
+    "$M_CONFIG") open -e "$BASE/config.json" 2>>"$LOG" || open_path "$BASE/config.json" ;;
+    "$M_INBOX") open_path "$BASE/inbox" ;;
+    "$M_OUTPUT") mkdir -p "$BASE/output"; open_path "$BASE/output" ;;
     *) exit 0 ;;
   esac
 done

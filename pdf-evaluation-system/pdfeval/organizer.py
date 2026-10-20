@@ -68,7 +68,8 @@ def update_answers(folder: Path, person: Person, reads: list[ItemRead]) -> None:
     for r in reads:
         answers[r.item] = r.answer
         statuses[r.item] = r.status
-        scores[r.item] = " / ".join(f"{s:.1f}" for s in r.scores)
+        if r.scores:
+            scores[r.item] = " / ".join(f"{s:.1f}" for s in r.scores)
 
     old_scores = {}
     if path.exists():
@@ -127,3 +128,12 @@ def load_answer_sheet(folder: Path, person: Person) -> AnswerSheet | None:
         answers[item] = ans
         statuses[item] = str(status or "未記入").strip()
     return AnswerSheet(person, folder, answers, statuses)
+
+
+def set_answer(folder: Path, person: Person, item: str, answer: int | None) -> None:
+    """回答確認シートの1項目を、担当者が確認した回答（None=未回答）にして「確認済」にする。"""
+    if item not in ALL_ITEMS:
+        raise ValueError(f"項目 {item} はありません")
+    if answer is not None and not 1 <= answer <= 4:
+        raise ValueError("回答は 1〜4 で指定してください")
+    update_answers(folder, person, [ItemRead(item, answer, "確認済", [])])

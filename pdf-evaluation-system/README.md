@@ -50,31 +50,21 @@
 
 ## Macで使う場合
 
-Mac用パッケージ（`pdf-evaluation-system-1.0.0-mac-offline.zip`）を使います。
-ライブラリを同梱しているので、**Pythonさえ入っていればネット接続なしで**セットアップできます
-（Apple Silicon〔M1〜M4〕・Intel 両対応。Intel Mac は macOS 14 以降）。
+配布ファイルは `stresscheck_v<版>.zip`（1ファイル・約130KB）です。
 
-1. **Python を入れる（初回のみ）**：https://www.python.org/downloads/macos/ から
-   「macOS 64-bit universal2 installer」（3.12 または 3.13）をダウンロードしてインストール
-   （ネットのないMacには、別のPCでダウンロードしたインストーラをUSB等で持ち込む）
-2. zip をダブルクリックして展開
-3. **最初の1回だけ**「ターミナル」を開いて次を実行（ネットから来たファイルの実行ブロックを解除）
+1. **Python を入れる（初回のみ）**：https://www.python.org/downloads/macos/ の「macOS 64-bit universal2 installer」（3.12 または 3.13）
+2. `stresscheck_v<版>.zip` を「YADOLI訪問看護ステーション」フォルダ（または「ダウンロード」）に保存
+3. 「ターミナル」に次の1行を貼り付けて Enter（版番号は配布ファイルに合わせる）
    ```
-   xattr -dr com.apple.quarantine （展開したフォルダをここにドラッグ＆ドロップ）
+   Z="$(find ~/Downloads ~/Desktop ~/Documents ~/Library/CloudStorage ~/Library/Mobile\ Documents -name 'stresscheck_v1.2.0*.zip' 2>/dev/null | head -1)"; if [ -n "$Z" ]; then T="$(mktemp -d)"; unzip -oq "$Z" -d "$T" && bash "$T/update.sh" "$Z"; else echo "stresscheck_v1.2.0.zip が見つかりません"; fi
    ```
-   ※ 代わりに、各 `.command` を **右クリック →「開く」→「開く」** でも実行できます。
-4. `setup.command` をダブルクリック
-5. `動作確認.command` をダブルクリック → 架空の4名分で、調査票作成 → 模擬スキャン → 読取 → 結果通知書・集計Excel までを一通り試せます
-   （結果は `動作確認_結果/output` に作られ、本番データには触れません）
+   → 「YADOLI訪問看護ステーション」フォルダの中に「ストレスチェック集計システム」フォルダができる
+   （既にあればアプリだけ新しくなり、名簿・設定・結果は残る。以前の分割ファイル等はゴミ箱へ）
+4. 中の「ストレスチェック.app」をダブルクリック
+   （初回のみ、以前の版の部品があれば使い回し、なければインターネットから取り込む）
 
-Windows の `.bat` の代わりに、Mac では次の `.command` を使います。
-
-| Windows | Mac |
-|---|---|
-| `setup.bat` | `setup.command` |
-| `make_forms.bat` | `make_forms.command` |
-| `run.bat` | `run.command` |
-| － | `動作確認.command`（サンプルで試す） |
+アプリのメニューで、名簿の追加・確認、調査票の作成、読み取り・集計、要確認の修正（スキャンを見ながら1問ずつ選ぶ）まで、
+**Excel や Numbers がなくてもすべてできます**。
 
 ## 使い方
 
