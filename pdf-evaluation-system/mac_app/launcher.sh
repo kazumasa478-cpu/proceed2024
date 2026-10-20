@@ -29,6 +29,26 @@ OSA
 
 notify() { osascript -e "display notification \"$1\" with title \"$APP_NAME\"" >/dev/null 2>&1; }
 
+ask_text() {  # ask_text "質問" "初期値" → 入力された文字（キャンセル時は終了コード1）
+  osascript - "$1" "$2" <<'OSA' 2>/dev/null
+on run argv
+  set r to display dialog (item 1 of argv) with title "ストレスチェック集計システム" default answer (item 2 of argv) buttons {"キャンセル", "保存"} default button 2 cancel button 1
+  return text returned of r
+end run
+OSA
+}
+
+choose() {  # choose "説明" 項目... → 選んだ項目（「戻る」なら空）
+  local prompt="$1"; shift
+  osascript - "$prompt" "$@" <<'OSA' 2>/dev/null
+on run argv
+  set r to choose from list (items 2 thru -1 of argv) with title "ストレスチェック集計システム" with prompt (item 1 of argv) OK button name "選ぶ" cancel button name "戻る"
+  if r is false then return ""
+  return item 1 of r
+end run
+OSA
+}
+
 # --- 置き場所のチェック（ダウンロードしたまま開くと、macOSが一時的な場所で起動することがある） ---
 case "$APP" in
   */AppTranslocation/*)
@@ -155,12 +175,50 @@ PY
 結果は「動作確認_結果」フォルダにあり、本番のデータには影響しません。" >/dev/null
 }
 
+# --- 設定（相談先など）をアプリの画面で変更する ---
+settings_menu() {
+  local P_PREVIEW="▶ 結果通知書の見本を見る（今の設定で作成）"
+  local P_FILE="▶ 設定ファイルを直接開く（上級者向け）"
+  while true; do
+    local keys=() labels=() currents=() hints=() items=() k l c h
+    while IFS=$'\x1f' read -r k l c h; do
+      [ -n "$k" ] || continue
+      keys+=("$k"); labels+=("$l"); currents+=("$c"); hints+=("$h")
+      items+=("$l：${c:-（未設定）}")
+    done < <("$PY" -m pdfeval settings-list --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+    local pick
+    pick=$(choose "変更したい項目を選んでください。結果通知書に載る内容です。" "${items[@]}" "$P_PREVIEW" "$P_FILE")
+    case "$pick" in
+      "") return ;;
+      "$P_PREVIEW")
+        local out
+        out=$("$PY" -m pdfeval preview-report --config "$BASE/config.json" --base "$BASE" 2>>"$LOG" | tail -1)
+        [ -f "$out" ] && open "$out" || dialog "見本を作れませんでした。logs/app.log を確認してください。" >/dev/null ;;
+      "$P_FILE") open -e "$BASE/config.json" ;;
+      *)
+        local i
+        for i in "${!items[@]}"; do
+          [ "${items[$i]}" = "$pick" ] || continue
+          local new msg
+          new=$(ask_text "「${labels[$i]}」を入力してください。
+${hints[$i]}" "${currents[$i]}") || break
+          msg=$("$PY" -m pdfeval settings-set --key "${keys[$i]}" --value "$new" --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+          dialog "$msg
+
+これから作る結果通知書に反映されます。
+すでに作った結果通知書を作り直すには、メニューの「スキャンしたPDFを読み取って集計する」をもう一度実行してください。" >/dev/null
+          break
+        done ;;
+    esac
+  done
+}
+
 # --- メニュー ---
 M_RUN="スキャンしたPDFを読み取って集計する"
 M_FORMS="名簿から調査票（印刷用PDF）を作る"
 M_DEMO="動作確認（サンプルで試す）"
 M_ROSTER="名簿を開く（名簿.csv）"
-M_CONFIG="設定を開く（実施者名・相談窓口など）"
+M_CONFIG="設定を変更する（相談先・連絡先など）"
 M_INBOX="スキャンPDFの置き場所（inbox）を開く"
 M_OUTPUT="結果フォルダ（output）を開く"
 while true; do
@@ -204,7 +262,7 @@ $SUMMARY" >/dev/null
       fi ;;
     "$M_DEMO") demo ;;
     "$M_ROSTER") open "$BASE/名簿.csv" ;;
-    "$M_CONFIG") open -e "$BASE/config.json" ;;
+    "$M_CONFIG") settings_menu ;;
     "$M_INBOX") open "$BASE/inbox" ;;
     "$M_OUTPUT") mkdir -p "$BASE/output"; open "$BASE/output" ;;
     *) exit 0 ;;

@@ -20,9 +20,9 @@ LEVEL_COLOR = {"良好": HexColor("#2E8B7A"), "ふつう": HexColor("#C9A227"),
 TRACK = HexColor("#E6E6E6")
 
 ADVICE = {
-    "B": "心身のストレス反応が強めに出ています。睡眠と休養を優先し、つらい状態が続くときは早めに相談窓口や医療機関に相談してください。",
+    "B": "心身のストレス反応が強めに出ています。睡眠と休養を優先し、つらい状態が続くときは早めに相談先や医療機関に相談してください。",
     "A": "仕事の量・負担や職場環境などから、ストレスを受けやすい状況です。抱え込まず、上司や担当者に業務の調整を相談してみてください。",
-    "C": "周囲からの支えを得にくいと感じています。身近な人や相談窓口など、話しやすい相手に声をかけてみてください。",
+    "C": "周囲からの支えを得にくいと感じています。身近な人や相談先など、話しやすい相手に声をかけてみてください。",
 }
 GOOD = "現在、目立ったストレスの偏りはみられません。今の生活リズムやストレス対処を続けてください。"
 
@@ -68,6 +68,12 @@ def _wrap(text: str, width_mm: float, size: float) -> list[str]:
     return lines + ([cur] if cur else [])
 
 
+def _with_detail(text: str, rep: dict) -> str:
+    """相談先・申出先の後ろに連絡先（設定されていれば）を付ける。"""
+    detail = str(rep.get("contact_detail", "")).strip()
+    return f"{text}（{detail}）" if text and detail else text
+
+
 def draw_report(c: canvas.Canvas, person: Person, res: Result, cfg: dict) -> None:
     cv = _Canvas(c)
     rep = cfg.get("report", {})
@@ -98,7 +104,7 @@ def draw_report(c: canvas.Canvas, person: Person, res: Result, cfg: dict) -> Non
     y += 22
     if res.high_stress:
         for line in _wrap("医師による面接指導を受けることをお勧めします。面接指導を希望される場合は、次の申出先へお申し出ください。"
-                          + rep.get("interview_request", ""), width, 9):
+                          + _with_detail(rep.get("interview_request", ""), rep), width, 9):
             cv.text(left, y + 3.5, line, size=9)
             y += 5
         y += 1
@@ -167,7 +173,7 @@ def draw_report(c: canvas.Canvas, person: Person, res: Result, cfg: dict) -> Non
     # --- フッター ---
     fy = L.PAGE_H - 30
     cv.line(left, fy, right, fy, gray=0.6, width=0.5)
-    foot = [rep.get("contact", ""), rep.get("implementer", ""),
+    foot = [_with_detail(rep.get("contact", ""), rep), rep.get("implementer", ""),
             "この結果は、あなたの同意なく会社（事業者）に提供されることはありません。",
             "※判定は厚生労働省「ストレスチェック制度実施マニュアル」の合計点数方式（評価基準の設定例）によります。"
             "項目別の3段階表示は本書独自の簡易区分です。"]

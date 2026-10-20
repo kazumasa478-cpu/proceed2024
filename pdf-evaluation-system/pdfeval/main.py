@@ -23,8 +23,55 @@ log = logging.getLogger("pdfeval")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+# 以前の版の見本の文言。設定がこのままなら新しい既定値に置き換える
+_OLD_PLACEHOLDERS = {
+    "contact": "相談窓口：〇〇部 健康管理担当（内線 0000）",
+    "interview_request": "申出先：〇〇部 健康管理担当（内線 0000）",
+}
+
+
 def load_config(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    """設定を読む。新しい版で増えた項目は既定値で補い、旧版の見本の文言は新しい既定値に更新する。"""
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    default_path = BASE_DIR / "config.json"
+    if not default_path.exists() or default_path.resolve() == path.resolve():
+        return cfg
+    defaults = json.loads(default_path.read_text(encoding="utf-8")).get("report", {})
+    rep = cfg.setdefault("report", {})
+    changed = False
+    for key, value in defaults.items():
+        if key not in rep or rep[key] == _OLD_PLACEHOLDERS.get(key):
+            rep[key] = value
+            changed = True
+    if changed:
+        path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return cfg
+
+
+def cmd_settings(config_path: Path, cfg: dict, action: str, key: str, value: str) -> int:
+    from .settings import list_settings, set_setting
+    if action == "list":      # キー␟名前␟現在の値␟説明（Macアプリ用。空欄があっても列がずれない区切り文字）
+        for k, label, current, hint in list_settings(cfg):
+            print("\x1f".join((k, label, current, hint)))
+        return 0
+    try:
+        saved = set_setting(config_path, key, value)
+    except ValueError as e:
+        print(e)
+        return 1
+    print(f"保存しました：{saved or '（空欄）'}")
+    return 0
+
+
+def cmd_preview(base: Path, cfg: dict) -> int:
+    """今の設定で、架空の人の結果通知書（見本）を作る。"""
+    from .questionnaire import ALL_ITEMS, REVERSED
+    answers = {i: (1 if i in REVERSED else 4) if i[0] == "B" else 2 for i in ALL_ITEMS}   # 高ストレス者の例
+    res = score(answers, cfg["criteria"])
+    out = base / "見本_結果通知書.pdf"
+    write_report(out, Person("E0000", "見本 太郎", "見本部署"), res, cfg)
+    print(out)
+    return 0
 
 
 def _roster(base: Path, cfg: dict) -> dict[str, Person]:
@@ -138,11 +185,13 @@ def cmd_run(base: Path, cfg: dict) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pdfeval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "settings-list", "settings-set", "preview-report"])
     parser.add_argument("--config", type=Path, default=BASE_DIR / "config.json")
     parser.add_argument("--base", type=Path, default=None,
                         help="名簿・inbox・output を置く基準フォルダ (既定: 設定ファイルと同じ場所)")
     parser.add_argument("--separate", action="store_true", help="forms: 1人1ファイルで出力する")
+    parser.add_argument("--key", default="", help="settings-set: 変更する項目")
+    parser.add_argument("--value", default="", help="settings-set: 新しい値")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
 
@@ -157,4 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config)
     if args.command == "forms":
         return cmd_forms(base, cfg, args.separate)
+    if args.command.startswith("settings-"):
+        return cmd_settings(args.config, cfg, args.command[len("settings-"):], args.key, args.value)
+    if args.command == "preview-report":
+        return cmd_preview(base, cfg)
     return cmd_run(base, cfg)

@@ -92,3 +92,36 @@ class EndToEndTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettingsTest(unittest.TestCase):
+    def test_list_and_set(self):
+        import json
+        from pdfeval.settings import list_settings, set_setting
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            shutil.copy(ROOT / "config.json", path)
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+            current = {k: v for k, _, v, _ in list_settings(cfg)}
+            self.assertEqual(current["contact"], "株式会社proceed YADOLI訪問看護ステーション")   # 頭の「相談先：」は除く
+            self.assertEqual(current["contact_detail"], "")
+            # 頭の文字を自分で入れても二重にならない／改行は取り除く
+            self.assertEqual(set_setting(path, "contact", "相談先：YADOLI 相談窓口\n"), "相談先：YADOLI 相談窓口")
+            self.assertEqual(set_setting(path, "contact_detail", "電話 03-1234-5678"), "電話 03-1234-5678")
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["criteria"], cfg["criteria"])        # ほかの設定は変わらない
+            with self.assertRaises(ValueError):
+                set_setting(path, "criteria", "x")
+
+    def test_old_placeholder_is_migrated(self):
+        import json
+        from pdfeval.main import load_config
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+            cfg["report"]["contact"] = "相談窓口：〇〇部 健康管理担当（内線 0000）"
+            del cfg["report"]["contact_detail"]
+            path.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+            new = load_config(path)
+            self.assertEqual(new["report"]["contact"], "相談先：株式会社proceed YADOLI訪問看護ステーション")
+            self.assertEqual(new["report"]["contact_detail"], "")
