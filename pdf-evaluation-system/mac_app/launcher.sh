@@ -73,13 +73,21 @@ python.org から「macOS 64-bit universal2 installer」をダウンロードし
     [ "$b" = "ダウンロードページを開く" ] && open "https://www.python.org/downloads/macos/"
     exit 1
   fi
-  notify "初回の準備をしています（1〜2分かかります）"
+  if [ -d "$RES/wheels" ]; then
+    notify "初回の準備をしています（1〜2分かかります）"
+    src=(--no-index --find-links "$RES/wheels")
+  else
+    dialog "初回の準備として、必要な部品をインターネットから取り込みます（数分かかります）。
+インターネットにつながった状態で「OK」を押してください。" >/dev/null
+    notify "必要な部品を取り込んでいます…"
+    src=()
+  fi
   {
     echo "=== setup $(date) with $py"
     rm -rf "$VENV"
     mkdir -p "$SUPPORT"
     "$py" -m venv "$VENV" &&
-    "$VENV/bin/python" -m pip install --no-index --find-links "$RES/wheels" -r "$RES/requirements.txt"
+    "$VENV/bin/python" -m pip install --disable-pip-version-check "${src[@]}" -r "$RES/requirements.txt"
   } >>"$LOG" 2>&1
   if ! "$VENV/bin/python" -c "import cv2, reportlab, openpyxl, pypdfium2" >>"$LOG" 2>&1; then
     rm -rf "$VENV"
@@ -88,7 +96,19 @@ logs/app.log の内容を担当者に送ってください。"
     exit 1
   fi
 }
-[ -x "$VENV/bin/python" ] || setup
+reuse_existing_venv() {  # 以前の版で入れた部品がそのまま使えるなら使う（更新時に部品を送らなくて済む）
+  local v
+  for v in "$SUPPORT"/venv-*; do
+    [ -x "$v/bin/python" ] || continue
+    if "$v/bin/python" -c "import cv2, numpy, PIL, pypdfium2, pypdf, reportlab, openpyxl" >/dev/null 2>&1; then
+      VENV="$v"; return 0
+    fi
+  done
+  return 1
+}
+if ! "$VENV/bin/python" -c "import cv2, reportlab, openpyxl, pypdfium2" >/dev/null 2>&1; then
+  reuse_existing_venv || setup
+fi
 PY="$VENV/bin/python"
 
 # 名簿・設定がなければ見本をコピー
