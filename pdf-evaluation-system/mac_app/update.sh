@@ -42,10 +42,17 @@ if [ -z "$Y" ] || [ ! -d "$Y" ]; then
   say "保存先のフォルダが決まらなかったため、中止しました。"
   exit 1
 fi
-echo "保存先: $Y/$FOLDER"
 
-# --- フォルダを作ってアプリを入れる（既にあれば名簿・設定・結果は残してアプリだけ新しくする） ---
-TARGET="$Y/$FOLDER"
+# --- すでに使っているフォルダ（BtoB 内など）があれば、いちばん最近使ったものを更新する ---
+TARGET=""; newest=0; others=()
+while IFS= read -r app; do
+  dir="$(dirname "$app")"
+  t=$(stat -f %m "$dir/logs/app.log" 2>/dev/null || stat -f %m "$dir" 2>/dev/null || echo 0)
+  if [ "$t" -gt "$newest" ]; then [ -n "$TARGET" ] && others+=("$TARGET"); TARGET="$dir"; newest="$t"
+  else others+=("$dir"); fi
+done < <(find "$Y" -maxdepth 5 -type d -name "$APP" -path "*/$FOLDER/*" 2>/dev/null)
+[ -n "$TARGET" ] || TARGET="$Y/$FOLDER"
+echo "保存先: $TARGET"
 mkdir -p "$TARGET" || { say "フォルダを作れませんでした：$TARGET"; exit 1; }
 if [ -d "$TARGET/$APP" ]; then
   rm -rf "$TARGET/$APP"
@@ -72,12 +79,19 @@ done
 trash "${cleanup[@]}"
 
 open -R "$TARGET/$APP"
+extra=""
+[ ${#others[@]} -gt 0 ] && extra="
+
+※ 同じアプリのフォルダが別の場所にもあります（使っていなければゴミ箱に入れてかまいません）：
+$(printf '%s\n' "${others[@]}")"
 b=$(ask2 "$note
 
 場所：
 $TARGET
 
 この中の「ストレスチェック.app」をダブルクリックすると使えます。
-（以前お送りした分割ファイル・インストーラなど ${#cleanup[@]} 個はゴミ箱に入れました）" "今すぐ開く" "閉じる")
+（以前お送りした分割ファイル・インストーラなど ${#cleanup[@]} 個はゴミ箱に入れました）$extra
+
+※ 初めて開くときに「書類フォルダへのアクセス」などを求められたら「許可」を押してください。" "今すぐ開く" "閉じる")
 [ "$b" = "今すぐ開く" ] && open "$TARGET/$APP"
 exit 0

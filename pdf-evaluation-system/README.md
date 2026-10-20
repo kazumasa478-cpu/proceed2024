@@ -56,7 +56,7 @@
 2. `stresscheck_v<版>.zip` を「YADOLI訪問看護ステーション」フォルダ（または「ダウンロード」）に保存
 3. 「ターミナル」に次の1行を貼り付けて Enter（版番号は配布ファイルに合わせる）
    ```
-   Z="$(find ~/Downloads ~/Desktop ~/Documents ~/Library/CloudStorage ~/Library/Mobile\ Documents -name 'stresscheck_v1.2.0*.zip' 2>/dev/null | head -1)"; if [ -n "$Z" ]; then T="$(mktemp -d)"; unzip -oq "$Z" -d "$T" && bash "$T/update.sh" "$Z"; else echo "stresscheck_v1.2.0.zip が見つかりません"; fi
+   Z="$(find ~/Downloads ~/Desktop ~/Documents ~/Library/CloudStorage ~/Library/Mobile\ Documents -name 'stresscheck_v1.2.1*.zip' 2>/dev/null | head -1)"; if [ -n "$Z" ]; then T="$(mktemp -d)"; unzip -oq "$Z" -d "$T" && bash "$T/update.sh" "$Z"; else echo "stresscheck_v1.2.1.zip が見つかりません"; fi
    ```
    → 「YADOLI訪問看護ステーション」フォルダの中に「ストレスチェック集計システム」フォルダができる
    （既にあればアプリだけ新しくなり、名簿・設定・結果は残る。以前の分割ファイル等はゴミ箱へ）

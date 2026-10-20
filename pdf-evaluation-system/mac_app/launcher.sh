@@ -53,14 +53,26 @@ OSA
 
 notify() { osascript -e "display notification \"$1\" with title \"$APP_NAME\"" >/dev/null 2>&1; }
 
+finder_open() {  # Finder に開いてもらう（Finder は「書類」フォルダを開く許可を必ず持っている）
+  osascript - "$1" <<'OSA' >/dev/null 2>&1
+on run argv
+  tell application "Finder"
+    open (POSIX file (item 1 of argv) as alias)
+    activate
+  end tell
+end run
+OSA
+}
+
 open_path() {  # ファイルやフォルダを開く。開けなければ理由を表示する
   local f="$1"
-  [ -e "$f" ] || { dialog "見つかりません：
-$f" >/dev/null; return 1; }
   open "$f" 2>>"$LOG" && return 0
+  finder_open "$f" && return 0
   case "$f" in *.csv|*.json|*.txt) open -e "$f" 2>>"$LOG" && return 0 ;; esac
-  dialog "開けませんでした（開くためのアプリが入っていない可能性があります）：
-$f" >/dev/null
+  dialog "開けませんでした：
+$f
+
+このアプリに、このフォルダを使う許可がない可能性があります。アプリを終了して開き直し、案内に従って許可してください。" >/dev/null
   return 1
 }
 
@@ -72,6 +84,25 @@ case "$APP" in
 「$APP_NAME」フォルダを Finder でドラッグして別の場所（YADOLI訪問看護ステーション のフォルダなど）へ移動してから、もう一度ダブルクリックしてください。" >/dev/null
     exit 0 ;;
 esac
+# 「書類」「デスクトップ」「Googleドライブ」などは、アプリごとに macOS の許可が必要
+if ! err=$(ls "$BASE" 2>&1 >/dev/null); then
+  case "$err" in *"not permitted"*|*"許可"*|*"Permission denied"*)
+    b=$(dialog "このアプリに、次のフォルダを使う許可がありません。
+$BASE
+
+【許可のしかた】
+1. 下の「設定を開く」を押す（「フルディスクアクセス」の画面と、このアプリの場所が開きます）
+2. 一覧の下の「＋」を押し、「ストレスチェック.app」を選んで「開く」
+　（または、開いた Finder から「ストレスチェック.app」を一覧へドラッグ）
+3. 「ストレスチェック」のスイッチをオンにする（Macのパスワードを聞かれたら入力）
+4. このアプリをもう一度ダブルクリックする" "設定を開く" "終了")
+    if [ "$b" = "設定を開く" ]; then
+      open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+      osascript -e "tell application \"Finder\" to reveal (POSIX file \"$APP\" as alias)" -e 'tell application "Finder" to activate' >/dev/null 2>&1
+    fi
+    exit 0 ;;
+  esac
+fi
 if [ ! -w "$BASE" ]; then
   dialog "このフォルダには書き込みできません：
 $BASE
@@ -207,7 +238,7 @@ roster_menu() {
 fix_person() {  # fix_person ID 表示名 スキャンファイル(|区切り)
   local pid="$1" label="$2" files="$3" f
   IFS='|' read -r -a scans <<< "$files"
-  for f in "${scans[@]}"; do [[ "$f" == *.pdf ]] && open "$f" 2>>"$LOG"; done
+  for f in "${scans[@]}"; do [[ "$f" == *.pdf ]] && open_path "$f"; done
   local lines
   lines=$(pdfeval items --id "$pid" 2>>"$LOG")
   [ -n "$lines" ] || return 0
@@ -287,7 +318,7 @@ simulate_scan.main()
 PY
     "$PY" -m pdfeval run --config "$d/config.json" --base "$d"
   } >>"$LOG" 2>&1
-  open "$d/output"
+  open_path "$d/output"
   dialog "動作確認が完了しました（架空の4名分）。
 
 ・結果通知書_印刷用_全員分.pdf … 本人に渡すA4の結果
@@ -341,7 +372,7 @@ $status_text
       fi
       run_pdfeval "読み取り・集計" run
       st=$?
-      open "$BASE/output" 2>>"$LOG"
+      open_path "$BASE/output"
       [ $st -eq 0 ] && head="完了しました。" || head="一部のファイルを読み取れませんでした（output/_読取不可 を確認してください）。"
       dialog "$head
 
@@ -351,7 +382,7 @@ $SUMMARY
     "$M_TODO") todo ;;
     "$M_FORMS")
       if run_pdfeval "調査票の作成" forms; then
-        open "$BASE/調査票" 2>>"$LOG"
+        open_path "$BASE/調査票"
         dialog "調査票を作成しました。
 
 $SUMMARY
