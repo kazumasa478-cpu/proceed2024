@@ -23,7 +23,7 @@ from pdfeval import __version__
 ROOT = Path(__file__).resolve().parent
 INCLUDE = ["pdfeval", "sample", "tests", "config.json", "requirements.txt", "README.md"]
 LAUNCHERS = {
-    "win": ["setup.bat", "make_forms.bat", "run.bat", "check.bat"],
+    "win": ["setup.bat", "make_forms.bat", "run.bat"],
     "mac": ["setup.command", "make_forms.command", "run.command", "動作確認.command",
             "setup.sh", "run.sh"],
 }

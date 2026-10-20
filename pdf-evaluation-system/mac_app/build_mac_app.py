@@ -82,8 +82,6 @@ APP="__APP__"
 ZIP="__FOLDER___Mac_install.zip"
 SHA="__SHA__"
 PARTS=(__PARTS__)
-# 分割ファイルごとの「名前:バイト数:SHA256」（どのファイルが壊れているかを特定するため）
-PART_INFO=(__PART_INFO__)
 
 say() { osascript - "$1" <<'OSA' >/dev/null 2>&1
 on run argv
@@ -100,55 +98,19 @@ OSA
 }
 trash() { for f in "$@"; do [ -e "$f" ] && osascript -e "tell application \"Finder\" to delete POSIX file \"$PWD/$f\"" >/dev/null 2>&1; done; }
 
-# --- 分割ファイルを1つずつ確認する ---
-# 同じファイルを2回ダウンロードして「〜 (1).part」「〜 2.part」になっている場合も、正しい方を使う
-use=(); bad=(); missing=()
-for info in "${PART_INFO[@]}"; do
-  name="${info%%:*}"; rest="${info#*:}"; size="${rest%%:*}"; hash="${rest#*:}"
-  stem="${name%.*}"; ext="${name##*.}"
-  found=""; seen=""
-  for cand in "$name" "$stem (1).$ext" "$stem(1).$ext" "$stem 2.$ext" "$stem (2).$ext"; do
-    [ -f "$cand" ] || continue
-    seen="$cand"
-    actual=$(stat -f %z "$cand" 2>/dev/null || stat -c %s "$cand")
-    if [ "$actual" = "$size" ] && [ "$(shasum -a 256 "$cand" | cut -d' ' -f1)" = "$hash" ]; then
-      found="$cand"; break
-    fi
-  done
-  if [ -n "$found" ]; then
-    use+=("$found")
-  elif [ -n "$seen" ]; then
-    actual=$(stat -f %z "$seen" 2>/dev/null || stat -c %s "$seen")
-    if [ "$actual" -lt "$size" ]; then
-      bad+=("・$name（$((actual / 1048576))MB しかありません。本来は $((size / 1048576))MB）")
-    else
-      bad+=("・$name（中身が違います）")
-    fi
-  else
-    missing+=("・$name")
-  fi
-done
-if [ ${#missing[@]} -gt 0 ] || [ ${#bad[@]} -gt 0 ]; then
-  msg=""
-  [ ${#missing[@]} -gt 0 ] && msg="次のファイルが見つかりません。
-$(printf '%s\n' "${missing[@]}")
-"
-  [ ${#bad[@]} -gt 0 ] && msg="${msg}次のファイルが途中までしか保存されていないか、壊れています。
-$(printf '%s\n' "${bad[@]}")
-"
-  say "${msg}
-このファイルだけを、もう一度ダウンロードして同じフォルダに上書き保存し、やり直してください。
+missing=()
+for p in "${PARTS[@]}"; do [ -f "$p" ] || missing+=("$p"); done
+if [ ${#missing[@]} -gt 0 ]; then
+  say "次のファイルが見つかりません。すべて同じフォルダに保存してから、もう一度開いてください。
 
-※ Google ドライブなどのフォルダに保存している場合は、同期が終わるまで待つか、いったん「ダウンロード」フォルダに保存してから移してください。
-
-（場所：$PWD）"
+${missing[*]}"
   exit 1
 fi
 
-cat "${use[@]}" > "$ZIP"
+cat "${PARTS[@]}" > "$ZIP"
 if [ "$(shasum -a 256 "$ZIP" | cut -d' ' -f1)" != "$SHA" ]; then
   rm -f "$ZIP"
-  say "ファイルの結合に失敗しました。空き容量を確認して、もう一度やり直してください。"
+  say "ファイルが壊れています。もう一度ダウンロードしてください。"
   exit 1
 fi
 
@@ -191,7 +153,7 @@ rm -rf "$TMP"
 
 # 送付用の分割ファイルと、以前お送りした旧版のファイルをゴミ箱へ
 old=()
-for f in "$ZIP" "${use[@]}" "${PARTS[@]}" ストレスチェックMac_*.part ストレスチェックMac_*.dat Mac用オフライン版_*.part pdf-evaluation-system-1.0.0-mac-offline.zip \
+for f in "$ZIP" "${PARTS[@]}" ストレスチェックMac_*.part Mac用オフライン版_*.part pdf-evaluation-system-1.0.0-mac-offline.zip \
          pdf-evaluation-system-1.0.0-mac.zip 結合ツール_Mac.zip 結合_Mac.command; do
   [ -e "$f" ] && old+=("$f")
 done
@@ -228,7 +190,7 @@ def make_icon(path: Path) -> None:
     img.save(path, sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
 
 
-def build_tree(dest: Path, wheels: Path | None) -> Path:
+def build_tree(dest: Path, wheels: Path) -> Path:
     top = dest / FOLDER
     res = top / APP / "Contents" / "Resources"
     macos = top / APP / "Contents" / "MacOS"
@@ -241,8 +203,7 @@ def build_tree(dest: Path, wheels: Path | None) -> Path:
     for f in ("config.json", "requirements.txt"):
         shutil.copy(ROOT / f, res / f)
     (res / "VERSION").write_text(__version__, encoding="utf-8")
-    if wheels is not None:      # 更新版は同梱しない（Macに入っているライブラリを使い回す）
-        shutil.copytree(wheels, res / "wheels")
+    shutil.copytree(wheels, res / "wheels")
     make_icon(res / "AppIcon.icns")
     (top / "はじめにお読みください.txt").write_text(README, encoding="utf-8")
     return top
@@ -269,64 +230,15 @@ def split(path: Path, out_dir: Path) -> list[Path]:
     with path.open("rb") as f:
         i = 0
         while chunk := f.read(PART_SIZE):
-            p = out_dir / f"{PART_PREFIX}{i:02d}.dat"
+            p = out_dir / f"{PART_PREFIX}{i:02d}.part"
             p.write_bytes(chunk)
             parts.append(p)
             i += 1
     return parts
 
 
-def write_installer(parts: list[Path], out: Path) -> None:
-    """分割ファイルの一覧から「インストール.command」入りのzipを作る。"""
-    whole = hashlib.sha256()
-    infos = []
-    for p in parts:
-        data = p.read_bytes()
-        whole.update(data)
-        infos.append(f'"{p.name}:{len(data)}:{hashlib.sha256(data).hexdigest()}"')
-    script = (INSTALLER.replace("__FOLDER__", FOLDER).replace("__APP__", APP)
-              .replace("__SHA__", whole.hexdigest())
-              .replace("__PARTS__", " ".join(f'"{p.name}"' for p in parts))
-              .replace("__PART_INFO__", " ".join(infos)))
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-        info = zipfile.ZipInfo("インストール.command", date_time=(2026, 1, 1, 0, 0, 0))
-        info.create_system = 3
-        info.external_attr = 0o100755 << 16
-        zf.writestr(info, script.encode("utf-8"))
-
-
-def build_update(out_dir: Path) -> Path:
-    """ライブラリを含まない小さな配布ファイル（1ファイルで送れる大きさ）を作る。
-
-    アプリは初回起動時に、以前の版のライブラリがあれば使い回し、なければインターネットから取り込む。
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"stresscheck_v{__version__}.zip"
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        top = build_tree(tmp / "tree", None)
-        zip_tree(top, out)
-        with zipfile.ZipFile(out, "a", zipfile.ZIP_DEFLATED) as zf:
-            info = zipfile.ZipInfo("update.sh", date_time=(2026, 1, 1, 0, 0, 0))
-            info.create_system = 3
-            info.external_attr = 0o100755 << 16
-            zf.writestr(info, (HERE / "update.sh").read_bytes())
-    return out
-
-
 def main() -> None:
     out_dir = ROOT / "dist" / "mac"
-    if "--update" in sys.argv:
-        out = build_update(out_dir)
-        print(f"作成しました: {out} ({out.stat().st_size / 1024:.0f} KB)")
-        return
-    if "--installer-only" in sys.argv:
-        # 送付済みの分割ファイル（dist/mac にあるもの）に合わせてインストーラだけ作り直す
-        parts = sorted(p for p in out_dir.glob(f"{PART_PREFIX}*") if p.suffix in (".part", ".dat"))
-        out = out_dir / f"インストーラ_Mac_v{__version__}_確認機能付き.zip"
-        write_installer(parts, out)
-        print(f"作成しました: {out}（分割 {len(parts)}個に対応）")
-        return
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
@@ -339,7 +251,14 @@ def main() -> None:
         zip_tree(top, zip_path)
 
     parts = split(zip_path, out_dir)
-    write_installer(parts, out_dir / f"インストーラ_Mac_v{__version__}.zip")
+    sha = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    script = (INSTALLER.replace("__FOLDER__", FOLDER).replace("__APP__", APP).replace("__SHA__", sha)
+              .replace("__PARTS__", " ".join(f'"{p.name}"' for p in parts)))
+    with zipfile.ZipFile(out_dir / f"インストーラ_Mac_v{__version__}.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+        info = zipfile.ZipInfo("インストール.command", date_time=(2026, 1, 1, 0, 0, 0))
+        info.create_system = 3
+        info.external_attr = 0o100755 << 16
+        zf.writestr(info, script.encode("utf-8"))
     print(f"作成しました: {zip_path} ({zip_path.stat().st_size / 1024 / 1024:.0f} MB)")
     print(f"分割: {len(parts)}個 + インストーラ_Mac_v{__version__}.zip")
 

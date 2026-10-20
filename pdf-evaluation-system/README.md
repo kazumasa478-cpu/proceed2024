@@ -3,7 +3,7 @@
 紙で回答してもらった「職業性ストレス簡易調査票（57項目）」をスキャンしたPDFから、
 
 1. **QRコードで本人を特定**し、本人ごとのフォルダ（`output/ID_氏名/`）にスキャン原本を保存
-2. マークシート（塗りつぶした楕円）を読み取って **回答をExcel（回答確認.xlsx）に記録**
+2. ○の位置を読み取って **回答をExcel（回答確認.xlsx）に記録**
 3. 厚生労働省マニュアルの合計点数方式で **採点・高ストレス判定**
 4. **本人に手渡す A4 1枚の「結果のお知らせ」PDF**（円グラフ付き）と、**集計Excel**（円グラフ付き）を作成
 
@@ -12,7 +12,7 @@
 ## 全体の流れ
 
 ```
-名簿.csv ──(make_forms.bat)──▶ 調査票/調査票_全員分.pdf ──印刷・配布──▶ 本人がマークを塗りつぶす
+名簿.csv ──(make_forms.bat)──▶ 調査票/調査票_全員分.pdf ──印刷・配布──▶ 本人が○を記入
                                                                         │
                                        スキャン(PDF) ──▶ inbox/ に置く ◀─┘
                                                           │ (run.bat)
@@ -45,40 +45,48 @@
    |----|------|------|
    | E0001 | 山田 太郎 | 営業部 |
 
-4. `config.json` の `report` 欄を確認（相談先・申出先は「株式会社proceed YADOLI訪問看護ステーション」。
-   電話番号などの連絡先は `contact_detail` に入れると通知書に表示されます。実施者名・実施名もここで設定）
+4. `config.json` の `report` 欄に、実施者名・相談窓口・面接指導の申出先・実施名を記入
 
 ## Macで使う場合
 
-配布ファイルは `stresscheck_v<版>.zip`（1ファイル・約130KB）です。
+Mac用パッケージ（`pdf-evaluation-system-1.0.0-mac-offline.zip`）を使います。
+ライブラリを同梱しているので、**Pythonさえ入っていればネット接続なしで**セットアップできます
+（Apple Silicon〔M1〜M4〕・Intel 両対応。Intel Mac は macOS 14 以降）。
 
-1. **Python を入れる（初回のみ）**：https://www.python.org/downloads/macos/ の「macOS 64-bit universal2 installer」（3.12 または 3.13）
-2. `stresscheck_v<版>.zip` を「YADOLI訪問看護ステーション」フォルダ（または「ダウンロード」）に保存
-3. 「ターミナル」に次の1行を貼り付けて Enter（版番号は配布ファイルに合わせる）
+1. **Python を入れる（初回のみ）**：https://www.python.org/downloads/macos/ から
+   「macOS 64-bit universal2 installer」（3.12 または 3.13）をダウンロードしてインストール
+   （ネットのないMacには、別のPCでダウンロードしたインストーラをUSB等で持ち込む）
+2. zip をダブルクリックして展開
+3. **最初の1回だけ**「ターミナル」を開いて次を実行（ネットから来たファイルの実行ブロックを解除）
    ```
-   Z="$(find ~/Downloads ~/Desktop ~/Documents ~/Library/CloudStorage ~/Library/Mobile\ Documents -name 'stresscheck_v1.2.1*.zip' 2>/dev/null | head -1)"; if [ -n "$Z" ]; then T="$(mktemp -d)"; unzip -oq "$Z" -d "$T" && bash "$T/update.sh" "$Z"; else echo "stresscheck_v1.2.1.zip が見つかりません"; fi
+   xattr -dr com.apple.quarantine （展開したフォルダをここにドラッグ＆ドロップ）
    ```
-   → 「YADOLI訪問看護ステーション」フォルダの中に「ストレスチェック集計システム」フォルダができる
-   （既にあればアプリだけ新しくなり、名簿・設定・結果は残る。以前の分割ファイル等はゴミ箱へ）
-4. 中の「ストレスチェック.app」をダブルクリック
-   （初回のみ、以前の版の部品があれば使い回し、なければインターネットから取り込む）
+   ※ 代わりに、各 `.command` を **右クリック →「開く」→「開く」** でも実行できます。
+4. `setup.command` をダブルクリック
+5. `動作確認.command` をダブルクリック → 架空の4名分で、調査票作成 → 模擬スキャン → 読取 → 結果通知書・集計Excel までを一通り試せます
+   （結果は `動作確認_結果/output` に作られ、本番データには触れません）
 
-アプリのメニューで、名簿の追加・確認、調査票の作成、読み取り・集計、要確認の修正（スキャンを見ながら1問ずつ選ぶ）まで、
-**Excel や Numbers がなくてもすべてできます**。
+Windows の `.bat` の代わりに、Mac では次の `.command` を使います。
+
+| Windows | Mac |
+|---|---|
+| `setup.bat` | `setup.command` |
+| `make_forms.bat` | `make_forms.command` |
+| `run.bat` | `run.command` |
+| － | `動作確認.command`（サンプルで試す） |
 
 ## 使い方
 
 | 手順 | 操作 |
 |---|---|
 | ① 調査票作成 | `make_forms.bat` → `調査票/調査票_全員分.pdf` ができる（1人2枚、本人のID・氏名・QRコード入り） |
-| ② 印刷・配布 | **片面印刷・等倍（「用紙に合わせる」をオフ）**。黒ボールペンまたは濃い鉛筆（HB以上）で、番号の楕円を**塗りつぶして**もらう（○で囲む・レ点は読めません） |
+| ② 印刷・配布 | **片面印刷・等倍（「用紙に合わせる」をオフ）**。黒ボールペンで○を付けてもらう |
 | ③ スキャン | 回収した用紙をスキャンして PDF を `inbox/` に置く |
 | ④ 読取・集計 | `run.bat` → 結果が `output/` にできる。読み終えたPDFは `processed/` へ移動 |
-| ⑤ 確認 | 要確認の人を表示（Mac：アプリの「要確認の人を確認する」／Windows：`check.bat`）。`回答確認.xlsx` の黄色の行を原本を見て直し、「状態」を **確認済** にする → もう一度集計 |
+| ⑤ 確認 | 黄色の行（要確認／未記入／複数）があれば、`回答確認.xlsx` で原本を見て「回答」を直し「状態」を **確認済** にする → もう一度 `run.bat` |
 | ⑥ 手渡し | `output/結果通知書_印刷用_全員分.pdf` を印刷し、封筒に入れて本人へ |
 
 - 要確認が残っている人の結果通知書は作成されません（誤った結果を渡さないため）。
-- 以前に印刷した「○で囲む」形式の調査票も、そのまま読み取れます（QRコードで形式を判別します）。
 - 未記入のまま確定する場合も「状態」を「確認済」にすれば、その項目を除いて採点します（通知書に注記されます）。
 - 同じ人の用紙を再スキャンすると、その用紙分の回答が上書きされます。
 - `run.bat` は inbox が空でも、`回答確認.xlsx` の修正内容からすべての出力を作り直します。
@@ -108,7 +116,7 @@
 ```bash
 python -m pdfeval forms             # 調査票作成 (--separate で1人1ファイル)
 python -m pdfeval run               # 読取・集計
-python sample/simulate_scan.py      # 手で塗りつぶした風の模擬スキャンPDFを inbox/ に作成（動作確認用）
+python sample/simulate_scan.py      # 手書き風○付きの模擬スキャンPDFを inbox/ に作成（動作確認用）
 python -m unittest discover tests   # テスト
 python build_package.py             # 移設用zip（通常版）
 python build_package.py --os win --offline win   # Windows用オフライン版
@@ -120,7 +128,7 @@ python build_package.py --os mac --offline mac   # Mac用オフライン版（Ap
 | `pdfeval/questionnaire.py` | 57項目の設問・逆転項目・尺度・採点 |
 | `pdfeval/layout.py` | 調査票の座標（印刷と読取で共通） |
 | `pdfeval/forms.py` | QRコード入り調査票PDFの作成 |
-| `pdfeval/omr.py` | スキャン画像の位置補正・QR読取・マークの読取（旧形式の○囲みにも対応） |
+| `pdfeval/omr.py` | スキャン画像の位置補正・QR読取・○の読取 |
 | `pdfeval/organizer.py` | 本人フォルダ・回答確認.xlsx の保存/読込 |
 | `pdfeval/report_pdf.py` | A4 1枚の結果通知書 |
 | `pdfeval/excel_report.py` | 集計Excel（円グラフ） |

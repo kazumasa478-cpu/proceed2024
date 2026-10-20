@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import csv
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,61 +29,27 @@ class Person:
     dept: str = ""
 
 
-ROSTER_HEADER = ["ID", "氏名", "所属"]
-_ID_OK = re.compile(r"^[0-9A-Za-z_-]{1,20}$")
-
-
-def valid_id(person_id: str) -> bool:
-    """ID は英数字・ハイフン・アンダーバーのみ（QRコードとフォルダ名に使うため）。"""
-    return bool(_ID_OK.match(person_id))
-
-
 def read_roster(path: Path) -> list[Person]:
-    """名簿CSV（列: ID, 氏名, 所属）を読む。UTF-8（BOMあり/なし）・Shift_JIS・UTF-16 に対応。"""
+    """名簿CSV（列: ID, 氏名, 所属）。Excelで保存したShift_JISにも対応。"""
     raw = path.read_bytes()
-    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
-        text = raw.decode("utf-16")
-    else:
-        for enc in ("utf-8-sig", "cp932"):
-            try:
-                text = raw.decode(enc)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            raise ValueError(f"名簿の文字コードを判別できません: {path}")
-    lines = text.splitlines()
-    delimiter = "\t" if lines and "\t" in lines[0] and "," not in lines[0] else ","
-    people, bad = [], []
-    for row in csv.DictReader(lines, delimiter=delimiter):
-        row = {(k or "").strip().lstrip("\ufeff"): (v or "").strip() for k, v in row.items() if k}
-        pid, name = row.get("ID", ""), row.get("氏名") or row.get("名前", "")
-        if not pid and not name:
+    for enc in ("utf-8-sig", "cp932"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
             continue
-        if not pid or not name:
-            bad.append(f"IDまたは氏名が空の行があります（{pid or name}）")
-        elif not valid_id(pid):
-            bad.append(f"ID「{pid}」に使えない文字があります（英数字・-・_ のみ）")
-        else:
-            people.append(Person(pid, name, row.get("所属", "")))
+    else:
+        raise ValueError(f"{path} の文字コードを判別できません")
+    people = []
+    for row in csv.DictReader(text.splitlines()):
+        row = {k.strip(): (v or "").strip() for k, v in row.items() if k}
+        if row.get("ID") and row.get("氏名"):
+            people.append(Person(row["ID"], row["氏名"], row.get("所属", "")))
     ids = [p.id for p in people]
-    dup = sorted({i for i in ids if ids.count(i) > 1})
+    dup = {i for i in ids if ids.count(i) > 1}
     if dup:
-        bad.append(f"IDが重複しています: {', '.join(dup)}")
-    if bad:
-        raise ValueError("名簿に問題があります：\n" + "\n".join(bad))
+        raise ValueError(f"名簿のIDが重複しています: {', '.join(sorted(dup))}")
     return people
-
-
-def write_roster(path: Path, people: list[Person]) -> None:
-    """名簿CSVを書く。BOM付きUTF-8にして、Excel・Numbers・テキストエディットのどれで開いても文字化けしないようにする。"""
-    import io
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\r\n")
-    w.writerow(ROSTER_HEADER)
-    for p in people:
-        w.writerow([p.id, p.name, p.dept])
-    path.write_text(buf.getvalue(), encoding="utf-8-sig")
 
 
 def qr_payload(person_id: str, page: int, style: str = MARK_SHEET) -> str:

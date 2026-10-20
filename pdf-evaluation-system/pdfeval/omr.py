@@ -32,26 +32,8 @@ class PageRead:
     error: str = ""
 
 
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-
-
-def _image_pages(path) -> list[np.ndarray]:
-    """JPEG/PNG/TIFF（複数ページTIFFも可）をグレースケール画像にする。"""
-    from PIL import Image, ImageOps, ImageSequence
-    pages = []
-    with Image.open(path) as im:
-        for frame in ImageSequence.Iterator(im):
-            g = ImageOps.exif_transpose(frame.copy()).convert("L")
-            if max(g.size) > 3600:                      # スマホ写真などは縮小して処理を速くする
-                g.thumbnail((3600, 3600))
-            pages.append(np.array(g))
-    return pages
-
-
 def render_pages(pdf_path) -> list[np.ndarray]:
-    """PDF（または画像）の各ページをグレースケール画像にする。"""
-    if str(pdf_path).lower().endswith(tuple(IMAGE_SUFFIXES)):
-        return _image_pages(pdf_path)
+    """PDFの各ページをグレースケール画像にする。"""
     doc = pdfium.PdfDocument(str(pdf_path))
     try:
         return [np.array(page.render(scale=DPI / 72, grayscale=True).to_pil().convert("L"))
