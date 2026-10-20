@@ -130,13 +130,69 @@ PY
 
 ・結果通知書_印刷用_全員分.pdf … 本人に渡すA4の結果
 ・ストレスチェック集計.xlsx … 集計と円グラフ
-・鈴木一郎さんは、わざと「○2つ」「記入もれ」を入れてあるため「要確認」となり、通知書は作られません（正常な動作です）。
+・鈴木一郎さんは、わざと「2つ塗った」「記入もれ」を入れてあるため「要確認」となり、通知書は作られません（正常な動作です）。
 
 結果は「動作確認_結果」フォルダにあり、本番のデータには影響しません。" >/dev/null
 }
 
+# --- 要確認の人の一覧 ---
+todo() {
+  while true; do
+    local lines labels=() files=() kinds=()
+    lines=$("$PY" -m pdfeval todo --tsv --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+    while IFS=$'\t' read -r kind paths label; do
+      [ -n "$kind" ] || continue
+      kinds+=("$kind"); files+=("$paths"); labels+=("$label")
+    done <<< "$lines"
+    if [ ${#labels[@]} -eq 0 ]; then
+      dialog "要確認の人はいません。
+（全員の結果通知書を作成できる状態です）" >/dev/null
+      return
+    fi
+    local picked
+    picked=$(osascript - "${labels[@]}" <<'OSA' 2>/dev/null
+on run argv
+  set r to choose from list argv with title "要確認の人" with prompt "読み取りに自信がない回答が残っている人です。選ぶと「回答確認.xlsx」と調査票のスキャンを開きます。" OK button name "開く" cancel button name "メニューに戻る"
+  if r is false then return ""
+  return item 1 of r
+end run
+OSA
+)
+    [ -n "$picked" ] || return
+    local i
+    for i in "${!labels[@]}"; do
+      [ "${labels[$i]}" = "$picked" ] || continue
+      IFS='|' read -r -a open_files <<< "${files[$i]}"
+      for f in "${open_files[@]}"; do open "$f"; done
+      if [ "${kinds[$i]}" = "UNREADABLE" ]; then
+        dialog "このページは読み取れませんでした。
+
+・本システムで作った調査票か（四隅の黒い四角とQRコードがあるか）
+・用紙の端やQRコードが欠けたり汚れたりしていないか
+
+を確認し、必要ならスキャンし直して inbox に入れてください。" >/dev/null
+        continue 2
+      fi
+      local b
+      b=$(dialog "「回答確認.xlsx」の黄色い行を、スキャンを見ながら直してください。
+・「回答」に 1〜4 を入れ、「状態」を「確認済」にする
+・本人が答えていない項目は、回答を空欄のまま「確認済」にする
+・Numbers の場合は「ファイル」→「書き出す」→「Excel」で、同じ名前に上書き保存
+
+直して保存したら「集計し直す」を押してください。" "集計し直す" "一覧に戻る")
+      if [ "$b" = "集計し直す" ]; then
+        run_pdfeval "集計" run
+        dialog "集計し直しました。
+
+$SUMMARY" >/dev/null
+      fi
+    done
+  done
+}
+
 # --- メニュー ---
 M_RUN="スキャンしたPDFを読み取って集計する"
+M_TODO="要確認の人を確認する"
 M_FORMS="名簿から調査票（印刷用PDF）を作る"
 M_DEMO="動作確認（サンプルで試す）"
 M_ROSTER="名簿を開く（名簿.csv）"
@@ -144,7 +200,7 @@ M_CONFIG="設定を開く（実施者名・相談窓口など）"
 M_INBOX="スキャンPDFの置き場所（inbox）を開く"
 M_OUTPUT="結果フォルダ（output）を開く"
 while true; do
-  choice=$(osascript - "$M_RUN" "$M_FORMS" "$M_DEMO" "$M_ROSTER" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
+  choice=$(osascript - "$M_RUN" "$M_TODO" "$M_FORMS" "$M_DEMO" "$M_ROSTER" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
 on run argv
   set r to choose from list argv with title "ストレスチェック集計システム" with prompt "行う作業を選んで「OK」を押してください。" OK button name "OK" cancel button name "終了" default items {item 1 of argv}
   if r is false then return ""
@@ -168,7 +224,7 @@ PDFを inbox に入れてから実行してください。" "inboxを開く" "�
 
 $SUMMARY
 
-黄色の「要確認」がある人は、本人フォルダの 回答確認.xlsx を直して「状態」を「確認済」にし、もう一度この作業を行ってください。" >/dev/null ;;
+要確認の人がいる場合は、メニューの「要確認の人を確認する」から直してください。" >/dev/null ;;
     "$M_FORMS")
       if run_pdfeval "調査票の作成" forms; then
         open "$BASE/調査票"
@@ -182,6 +238,7 @@ $SUMMARY
 
 $SUMMARY" >/dev/null
       fi ;;
+    "$M_TODO") todo ;;
     "$M_DEMO") demo ;;
     "$M_ROSTER") open "$BASE/名簿.csv" ;;
     "$M_CONFIG") open -e "$BASE/config.json" ;;

@@ -27,6 +27,7 @@ class PageRead:
     source_page: int                  # 元PDF内のページ番号(1始まり)
     person_id: str | None = None
     form_page: int | None = None
+    style: str = ""                   # "M"=マークシート形式 / "C"=旧形式（○で囲む）
     items: list[ItemRead] = field(default_factory=list)
     error: str = ""
 
@@ -107,7 +108,45 @@ def _read_qr(img: np.ndarray) -> tuple[str, int] | None:
     return None
 
 
+def _judge(item: str, scores: list[float], min_ink: float, sure_ink: float, ratio: float) -> ItemRead:
+    order = sorted(range(4), key=lambda i: scores[i], reverse=True)
+    top, second = scores[order[0]], scores[order[1]]
+    if top < min_ink:
+        return ItemRead(item, None, "未記入", scores)
+    if second >= top * ratio and second >= min_ink:
+        return ItemRead(item, None, "複数", scores)
+    return ItemRead(item, order[0] + 1, "OK" if top >= sure_ink else "要確認", scores)
+
+
+def _read_bubbles(img: np.ndarray, page: L.Page, cfg: dict) -> list[ItemRead]:
+    """マークシート形式：各楕円の内側がどれだけ塗られているか（%）で判定する。
+
+    印刷の線と数字は薄い灰色なので、記入したインクだけが数えられる。
+    塗りつぶしは60〜100%、空欄は数%になり、差がはっきり出る。
+    """
+    ink = img < cfg.get("bubble_ink_threshold", 150)
+    min_ink = cfg.get("bubble_min_percent", 20.0)
+    sure_ink = cfg.get("bubble_sure_percent", 35.0)
+    ratio = cfg.get("ambiguous_ratio", 0.5)
+    rx, ry = L.BUBBLE_W / 2 * 0.8 * PX, L.BUBBLE_H / 2 * 0.75 * PX   # 線を避けて内側だけを見る
+    w, h = int(rx) + 1, int(ry) + 1
+    yy, xx = np.mgrid[-h:h + 1, -w:w + 1]
+    mask = (xx / rx) ** 2 + (yy / ry) ** 2 <= 1
+    results = []
+    for row in page.rows:
+        cy = int(round((row.y + row.h / 2) * PX))
+        raw = []
+        for k in range(1, 5):
+            cx = int(round(L.option_center_x(k) * PX))
+            region = ink[cy - h:cy + h + 1, cx - w:cx + w + 1]
+            raw.append(100.0 * region[mask].mean())
+        base = min(raw)
+        results.append(_judge(row.item, [round(r - base, 1) for r in raw], min_ink, sure_ink, ratio))
+    return results
+
+
 def _read_items(img: np.ndarray, page: L.Page, cfg: dict) -> list[ItemRead]:
+    """旧形式（数字を○で囲む）の読取。"""
     ink = (img < cfg.get("ink_threshold", 110)).astype(np.uint8)
     min_ink = cfg.get("min_mark_percent", 2.0)
     sure_ink = cfg.get("sure_mark_percent", 3.0)
@@ -123,15 +162,7 @@ def _read_items(img: np.ndarray, page: L.Page, cfg: dict) -> list[ItemRead]:
             raw.append(100.0 * region.mean())
         base = min(raw)                       # 印刷された数字の分を差し引く
         scores = [round(r - base, 2) for r in raw]
-        order = sorted(range(4), key=lambda i: scores[i], reverse=True)
-        top, second = scores[order[0]], scores[order[1]]
-        if top < min_ink:
-            results.append(ItemRead(row.item, None, "未記入", scores))
-        elif second >= top * ratio and second >= min_ink:
-            results.append(ItemRead(row.item, None, "複数", scores))
-        else:
-            status = "OK" if top >= sure_ink else "要確認"
-            results.append(ItemRead(row.item, order[0] + 1, status, scores))
+        results.append(_judge(row.item, scores, min_ink, sure_ink, ratio))
     return results
 
 
@@ -150,12 +181,13 @@ def read_page(gray: np.ndarray, source_page: int, cfg: dict) -> PageRead:
         qr = _read_qr(img)
         if qr is None:
             continue
-        result.person_id, result.form_page = qr
+        result.person_id, result.form_page, result.style = qr
         page = next((p for p in L.LAYOUT if p.number == result.form_page), None)
         if page is None:
             result.error = f"ページ番号 {result.form_page} が不正です"
             return result
-        result.items = _read_items(img, page, cfg)
+        reader = _read_bubbles if result.style == "M" else _read_items
+        result.items = reader(img, page, cfg)
         return result
     result.error = ("QRコードを読み取れません（QRの汚れ・かすれ、または本システムで作成した調査票ではない可能性）"
                     if markers_found else

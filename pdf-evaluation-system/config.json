@@ -27,7 +27,9 @@
     "title": "ストレスチェック結果のお知らせ",
     "exam_name": "2026年度 ストレスチェック",
     "implementer": "実施者：〇〇クリニック 産業医 〇〇 〇〇",
-    "contact": "相談窓口：〇〇部 健康管理担当（内線 0000）",
-    "interview_request": "申出先：〇〇部 健康管理担当（内線 0000）"
+    "contact": "相談先：株式会社proceed YADOLI訪問看護ステーション",
+    "interview_request": "申出先：株式会社proceed YADOLI訪問看護ステーション",
+    "_連絡先の説明": "電話番号・メールなどを contact_detail に入れると、相談先・申出先の後ろに表示されます（例：電話 00-0000-0000）",
+    "contact_detail": ""
   }
 }

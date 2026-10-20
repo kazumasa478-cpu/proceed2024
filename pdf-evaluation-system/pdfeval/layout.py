@@ -18,6 +18,7 @@ NO_W = 8.0
 OPT_X0 = 112.0                  # 選択肢列の左端
 OPT_W = 20.0                    # 選択肢1列の幅
 ROW_H = 6.0
+BUBBLE_W, BUBBLE_H = 8.0, 4.2   # マークシート形式の楕円（行の中央に置く）
 SEC_TITLE_H = 7.0
 COL_HEAD_H = 8.0
 GROUP_H = 5.5

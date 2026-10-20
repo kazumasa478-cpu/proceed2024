@@ -2,6 +2,7 @@
 
   python -m pdfeval forms   名簿から本人用QRコード入り調査票PDFを作成
   python -m pdfeval run     inbox のスキャンPDFを読取 → 本人別フォルダに保存 → 集計Excel・結果通知書PDFを作成
+  python -m pdfeval todo    要確認の人（読取に自信がない回答が残っている人）と読取不可のページを表示
 """
 from __future__ import annotations
 
@@ -23,8 +24,34 @@ log = logging.getLogger("pdfeval")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+# 以前の版の見本の文言。設定がこのままなら新しい既定値に置き換える
+_OLD_PLACEHOLDERS = {
+    ("report", "contact"): "相談窓口：〇〇部 健康管理担当（内線 0000）",
+    ("report", "interview_request"): "申出先：〇〇部 健康管理担当（内線 0000）",
+}
+
+
 def load_config(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    """設定を読む。新しい版で増えた項目は既定値で補い、旧版の見本の文言は新しい既定値に更新する。"""
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    default_path = BASE_DIR / "config.json"
+    if not default_path.exists() or default_path.resolve() == path.resolve():
+        return cfg
+    defaults = json.loads(default_path.read_text(encoding="utf-8"))
+    changed = False
+    for section, values in defaults.items():
+        if isinstance(values, dict):
+            target = cfg.setdefault(section, {})
+            for key, value in values.items():
+                if key not in target or target[key] == _OLD_PLACEHOLDERS.get((section, key)):
+                    target[key] = value
+                    changed = True
+        elif section not in cfg:
+            cfg[section] = values
+            changed = True
+    if changed:
+        path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return cfg
 
 
 def _roster(base: Path, cfg: dict) -> dict[str, Person]:
@@ -88,18 +115,65 @@ def read_inbox(base: Path, cfg: dict, roster: dict[str, Person]) -> int:
     return errors
 
 
-def build_outputs(base: Path, cfg: dict, roster: dict[str, Person]) -> None:
-    output = base / cfg["output_dir"]
-    results = []
+def _answer_sheets(output: Path, roster: dict[str, Person]):
+    """output 内の本人フォルダごとに回答確認シートを読む。"""
     known = {person_folder(output, p).name: p for p in roster.values()}
+    if not output.exists():
+        return
     for folder in sorted(p for p in output.iterdir() if p.is_dir() and not p.name.startswith("_")):
         person = known.get(folder.name)
         if person is None:
             pid, _, name = folder.name.partition("_")
             person = Person(pid, name)
         sheet = load_answer_sheet(folder, person)
-        if sheet is None:
-            continue
+        if sheet is not None:
+            yield folder, person, sheet
+
+
+def list_todo(base: Path, cfg: dict, roster: dict[str, Person]) -> tuple[list[dict], list[Path]]:
+    """要確認の人（回答確認シートに未確定の項目がある人）と、読取不可のページを返す。"""
+    output = base / cfg["output_dir"]
+    people = []
+    for folder, person, sheet in _answer_sheets(output, roster):
+        if sheet.unresolved:
+            people.append({
+                "person": person, "folder": folder,
+                "items": [(i, sheet.statuses.get(i, "未読取")) for i in sheet.unresolved],
+                "scans": sorted(folder.glob("調査票スキャン_*.pdf")),
+            })
+    unreadable = sorted((output / "_読取不可").glob("*.pdf")) if (output / "_読取不可").exists() else []
+    return people, unreadable
+
+
+def cmd_todo(base: Path, cfg: dict, tsv: bool) -> int:
+    people, unreadable = list_todo(base, cfg, _roster(base, cfg))
+    if tsv:   # Macアプリ用: 種別<TAB>開くファイル(|区切り)<TAB>表示名
+        for p in people:
+            counts: dict[str, int] = {}
+            for _, st in p["items"]:
+                counts[st] = counts.get(st, 0) + 1
+            detail = "・".join(f"{k}{v}件" for k, v in counts.items())
+            files = [p["folder"] / "回答確認.xlsx", *p["scans"]]
+            print(f"PERSON\t{'|'.join(map(str, files))}\t{p['person'].id} {p['person'].name}（{detail}）")
+        for f in unreadable:
+            print(f"UNREADABLE\t{f}\t読取不可のページ：{f.name}")
+        return 0
+    if not people and not unreadable:
+        print("要確認の人はいません。")
+        return 0
+    for p in people:
+        items = "、".join(f"{i}（{st}）" for i, st in p["items"])
+        print(f"■ {p['person'].id} {p['person'].name}：{len(p['items'])}件 … {items}")
+        print(f"    修正するファイル: {p['folder'] / '回答確認.xlsx'}")
+    for f in unreadable:
+        print(f"■ 読取不可のページ: {f}")
+    return 0
+
+
+def build_outputs(base: Path, cfg: dict, roster: dict[str, Person]) -> None:
+    output = base / cfg["output_dir"]
+    results = []
+    for folder, person, sheet in _answer_sheets(output, roster):
         for old in folder.glob("結果通知書_*.pdf"):
             old.unlink()
         if sheet.unresolved:
@@ -138,11 +212,12 @@ def cmd_run(base: Path, cfg: dict) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pdfeval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "todo"])
     parser.add_argument("--config", type=Path, default=BASE_DIR / "config.json")
     parser.add_argument("--base", type=Path, default=None,
                         help="名簿・inbox・output を置く基準フォルダ (既定: 設定ファイルと同じ場所)")
     parser.add_argument("--separate", action="store_true", help="forms: 1人1ファイルで出力する")
+    parser.add_argument("--tsv", action="store_true", help="todo: 機械向けのタブ区切りで出力する")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
 
@@ -157,4 +232,6 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config)
     if args.command == "forms":
         return cmd_forms(base, cfg, args.separate)
+    if args.command == "todo":
+        return cmd_todo(base, cfg, args.tsv)
     return cmd_run(base, cfg)

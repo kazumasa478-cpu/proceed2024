@@ -1,4 +1,4 @@
-"""動作確認用: 調査票に手書き風の○を付け、傾き・汚れのある「スキャン画像PDF」を作る。
+"""動作確認用: 調査票のマークを手で塗りつぶした風にし、傾き・汚れのある「スキャン画像PDF」を作る。
 
     python sample/simulate_scan.py            → inbox/スキャン_サンプル.pdf と sample/正解.json
 """
@@ -44,6 +44,20 @@ def hand_circle(draw: ImageDraw.ImageDraw, cx: float, cy: float, rng: random.Ran
     draw.line(pts, fill=rng.randint(10, 60), width=rng.randint(3, 5))
 
 
+def fill_bubble(draw: ImageDraw.ImageDraw, cx: float, cy: float, rng: random.Random) -> None:
+    """楕円を手で塗りつぶした風に描く（ボールペン〜鉛筆の濃さ、少しはみ出し・塗り残しあり）。"""
+    cx += rng.uniform(-0.5, 0.5) * PX
+    cy += rng.uniform(-0.3, 0.3) * PX
+    rx = L.BUBBLE_W / 2 * rng.uniform(0.75, 1.05) * PX
+    ry = L.BUBBLE_H / 2 * rng.uniform(0.7, 1.05) * PX
+    shade = rng.randint(20, 110)                       # 鉛筆の薄めの塗りも含める
+    draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=shade)
+    for _ in range(rng.randint(0, 6)):                 # 塗り残し
+        x = cx + rng.uniform(-rx, rx) * 0.7
+        y = cy + rng.uniform(-ry, ry) * 0.6
+        draw.ellipse((x - 3, y - 2, x + 3, y + 2), fill=235)
+
+
 def main(seed: int = 7) -> None:
     rng = random.Random(seed)
     people = read_roster(ROOT / "sample" / "名簿.csv")
@@ -68,10 +82,11 @@ def main(seed: int = 7) -> None:
                 answers[row.item] = None
                 continue
             answers[row.item] = k
-            hand_circle(draw, L.option_center_x(k) * PX, (row.y + 3.0) * PX, rng)
-            if (person.id, row.item) == ("E0003", "A5"):      # ○が2つ → 「複数」になるはず
+            cy = (row.y + row.h / 2) * PX
+            fill_bubble(draw, L.option_center_x(k) * PX, cy, rng)
+            if (person.id, row.item) == ("E0003", "A5"):      # 2つ塗った → 「複数」になるはず
                 answers[row.item] = None
-                hand_circle(draw, L.option_center_x(k % 4 + 1) * PX, (row.y + 3.0) * PX, rng)
+                fill_bubble(draw, L.option_center_x(k % 4 + 1) * PX, cy, rng)
         # スキャンの傾き・ずれ・ノイズ
         img = img.rotate(rng.uniform(-1.5, 1.5), resample=Image.BICUBIC, fillcolor=255,
                          translate=(rng.uniform(-25, 25), rng.uniform(-25, 25)))

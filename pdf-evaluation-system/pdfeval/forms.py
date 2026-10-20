@@ -18,6 +18,7 @@ from .questionnaire import SECTION_BY_KEY
 
 FONT = "HeiseiKakuGo-W5"
 QR_PREFIX = "SC57"
+MARK_SHEET = "M"     # QRの4番目の値。M=マークシート形式（ぬりつぶし）、なし=旧形式（○で囲む）
 ZEN = "１２３４"
 
 
@@ -51,14 +52,16 @@ def read_roster(path: Path) -> list[Person]:
     return people
 
 
-def qr_payload(person_id: str, page: int) -> str:
-    return f"{QR_PREFIX};{person_id};{page}"
+def qr_payload(person_id: str, page: int, style: str = MARK_SHEET) -> str:
+    return f"{QR_PREFIX};{person_id};{page}" + (f";{style}" if style == MARK_SHEET else "")
 
 
-def parse_qr(payload: str) -> tuple[str, int] | None:
+def parse_qr(payload: str) -> tuple[str, int, str] | None:
+    """(ID, ページ, 形式) を返す。形式は "M"=マークシート、"C"=旧形式（○で囲む）。"""
     parts = payload.split(";")
-    if len(parts) == 3 and parts[0] == QR_PREFIX and parts[2].isdigit():
-        return parts[1], int(parts[2])
+    if len(parts) in (3, 4) and parts[0] == QR_PREFIX and parts[2].isdigit():
+        style = MARK_SHEET if len(parts) == 4 and parts[3] == MARK_SHEET else "C"
+        return parts[1], int(parts[2]), style
     return None
 
 
@@ -98,13 +101,13 @@ class _Canvas:
         self.c.line(x1 * mm, self.y(y1), x2 * mm, self.y(y2))
 
 
-def _draw_markers_and_qr(cv: _Canvas, person: Person, page: int, n_pages: int) -> None:
+def _draw_markers_and_qr(cv: _Canvas, person: Person, page: int, n_pages: int, style: str) -> None:
     for cx, cy in L.marker_centers():
         h = L.MARKER / 2
         cv.c.setFillGray(0)
         cv.rect(cx - h, cy - h, L.MARKER, L.MARKER, fill=True, fill_gray=0)
     x, y, size = L.QR_BOX
-    widget = QrCodeWidget(qr_payload(person.id, page), barLevel="M")
+    widget = QrCodeWidget(qr_payload(person.id, page, style), barLevel="M")
     b = widget.getBounds()
     d = Drawing(size * mm, size * mm,
                 transform=[size * mm / (b[2] - b[0]), 0, 0, size * mm / (b[3] - b[1]), 0, 0])
@@ -113,7 +116,22 @@ def _draw_markers_and_qr(cv: _Canvas, person: Person, page: int, n_pages: int) -
     cv.text(x + size / 2, y + size + 3.5, f"{page}/{n_pages}", size=7, center=True)
 
 
-def _draw_header(cv: _Canvas, person: Person) -> None:
+def _bubble(cv: _Canvas, cx: float, cy: float, label: str = "", filled: bool = False) -> None:
+    """マークシートの楕円。線と数字は薄い灰色にして、記入したインクだけが濃く写るようにする。"""
+    c = cv.c
+    w, h = L.BUBBLE_W * mm, L.BUBBLE_H * mm
+    c.setLineWidth(0.6)
+    c.setStrokeGray(0.55)
+    c.setFillGray(0.1 if filled else 1)
+    c.ellipse(cx * mm - w / 2, cv.y(cy) - h / 2, cx * mm + w / 2, cv.y(cy) + h / 2,
+              stroke=1, fill=1 if filled else 0)
+    if label:
+        c.setFillGray(0.6)
+        c.setFont(FONT, 7)
+        c.drawCentredString(cx * mm, cv.y(cy) - 0.85 * mm, label)
+
+
+def _draw_header(cv: _Canvas, person: Person, style: str = MARK_SHEET) -> None:
     cv.text(L.LEFT, 26, "職業性ストレス簡易調査票（57項目）", size=15)
     top, h, label_w, w = 31.0, 6.5, 30.0, 140.0
     rows = [("ID", person.id), ("氏名", person.name), ("所属", person.dept),
@@ -124,12 +142,31 @@ def _draw_header(cv: _Canvas, person: Person) -> None:
         cv.rect(L.LEFT + label_w, y, w - label_w, h)
         cv.text(L.LEFT + 2, y + 4.6, label, size=9)
         cv.text(L.LEFT + label_w + 3, y + 4.6, value, size=10)
-    cv.text(L.LEFT, top + 4 * h + 5,
-            "・Ａ～Ｄの各項目について、最もあてはまる数字（１～４）を○で囲んでください。"
-            "黒のボールペンで記入してください。", size=8)
-    cv.text(L.LEFT, top + 4 * h + 9.5,
-            "・訂正するときは、誤った○に×を付けず、修正テープで消してから記入し直してください。"
-            "用紙は折らないでください。", size=8)
+    y1, y2 = top + 4 * h + 4.2, top + 4 * h + 8.8
+    if style != MARK_SHEET:
+        cv.text(L.LEFT, y1, "・Ａ～Ｄの各項目について、最もあてはまる数字（１～４）を○で囲んでください。"
+                "黒のボールペンで記入してください。", size=8)
+        cv.text(L.LEFT, y2, "・訂正するときは、誤った○に×を付けず、修正テープで消してから記入し直してください。"
+                "用紙は折らないでください。", size=8)
+        return
+    cv.text(L.LEFT, y1, "・各項目について、最もあてはまる番号の楕円を、黒のボールペンまたは濃い鉛筆（HB以上）で"
+            "ぬりつぶしてください。", size=8)
+    x = L.LEFT
+    cv.text(x, y2 + 0.2, "・よい例", size=8)
+    _bubble(cv, x + 16, y2 - 1.0, filled=True)
+    cv.text(x + 23, y2 + 0.2, "わるい例", size=8)
+    _bubble(cv, x + 43, y2 - 1.0, "1")                     # ○で囲む
+    cv.c.setLineWidth(0.7)
+    cv.c.setStrokeGray(0)
+    cv.c.ellipse((x + 37.5) * mm, cv.y(y2 + 1.9), (x + 48.5) * mm, cv.y(y2 - 3.9), stroke=1, fill=0)
+    _bubble(cv, x + 56, y2 - 1.0, "2")                     # レ点
+    cv.c.setLineWidth(0.9)
+    p = cv.c.beginPath()
+    p.moveTo((x + 53.5) * mm, cv.y(y2 - 1.2))
+    p.lineTo((x + 55.5) * mm, cv.y(y2 + 0.6))
+    p.lineTo((x + 59) * mm, cv.y(y2 - 3.0))
+    cv.c.drawPath(p, stroke=1, fill=0)
+    cv.text(x + 63, y2 + 0.2, "訂正は消しゴム・修正テープできれいに消してください。用紙は折らないでください。", size=8)
 
 
 def _draw_page_header_small(cv: _Canvas, person: Person) -> None:
@@ -137,12 +174,13 @@ def _draw_page_header_small(cv: _Canvas, person: Person) -> None:
     cv.text(L.LEFT, 34, f"ID：{person.id}　　氏名：{person.name}", size=10)
 
 
-def _draw_blocks(cv: _Canvas, page: L.Page) -> None:
+def _draw_blocks(cv: _Canvas, page: L.Page, style: str = MARK_SHEET) -> None:
     right = L.OPT_X0 + 4 * L.OPT_W
     for b in page.blocks:
         sec = SECTION_BY_KEY[b.section]
         if b.kind == "section":
-            cv.text(L.LEFT, b.y + 5, b.text + "　最もあてはまる数字に○を付けてください。", size=10)
+            how = "番号をぬりつぶしてください。" if style == MARK_SHEET else "数字に○を付けてください。"
+            cv.text(L.LEFT, b.y + 5, f"{b.text}　最もあてはまる{how}", size=10)
         elif b.kind == "colhead":
             cv.rect(L.LEFT, b.y, right - L.LEFT, b.h, fill_gray=0.88)
             cv.text(L.LEFT + L.NO_W / 2, b.y + 5.2, "No.", size=8, center=True)
@@ -159,20 +197,23 @@ def _draw_blocks(cv: _Canvas, page: L.Page) -> None:
             cv.text(L.LEFT + L.NO_W / 2, b.y + 4.3, str(b.no), size=9, center=True)
             cv.fit_text(L.LEFT + L.NO_W + 1, b.y + 4.3, b.text, L.OPT_X0 - L.LEFT - L.NO_W - 2)
             for k in range(1, 5):
-                # 数字は薄めの灰色（読取時に記入の○と区別しやすくするため）
-                cv.text(L.option_center_x(k), b.y + 4.3, ZEN[k - 1], size=10, center=True, gray=0.5)
+                if style == MARK_SHEET:
+                    _bubble(cv, L.option_center_x(k), b.y + b.h / 2, str(k))
+                else:
+                    # 数字は薄めの灰色（読取時に記入の○と区別しやすくするため）
+                    cv.text(L.option_center_x(k), b.y + 4.3, ZEN[k - 1], size=10, center=True, gray=0.5)
 
 
-def draw_form(c: canvas.Canvas, person: Person) -> None:
+def draw_form(c: canvas.Canvas, person: Person, style: str = MARK_SHEET) -> None:
     n_pages = len(L.LAYOUT)
     for page in L.LAYOUT:
         cv = _Canvas(c)
-        _draw_markers_and_qr(cv, person, page.number, n_pages)
+        _draw_markers_and_qr(cv, person, page.number, n_pages, style)
         if page.number == 1:
-            _draw_header(cv, person)
+            _draw_header(cv, person, style)
         else:
             _draw_page_header_small(cv, person)
-        _draw_blocks(cv, page)
+        _draw_blocks(cv, page, style)
         if page.number == n_pages:
             last = page.blocks[-1]
             cv.text(L.LEFT, last.y + last.h + 7,
@@ -180,7 +221,8 @@ def draw_form(c: canvas.Canvas, person: Person) -> None:
         c.showPage()
 
 
-def make_forms(people: list[Person], out_dir: Path, combined: bool = True) -> list[Path]:
+def make_forms(people: list[Person], out_dir: Path, combined: bool = True,
+               style: str = MARK_SHEET) -> list[Path]:
     """combined=True なら全員分を1つのPDF（まとめて両面印刷用）にする。"""
     pdfmetrics.registerFont(UnicodeCIDFont(FONT))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -190,14 +232,14 @@ def make_forms(people: list[Person], out_dir: Path, combined: bool = True) -> li
         c = canvas.Canvas(str(path), pagesize=(L.PAGE_W * mm, L.PAGE_H * mm))
         c.setTitle("職業性ストレス簡易調査票")
         for p in people:
-            draw_form(c, p)
+            draw_form(c, p, style)
         c.save()
         paths.append(path)
     else:
         for p in people:
             path = out_dir / f"調査票_{p.id}_{p.name}.pdf"
             c = canvas.Canvas(str(path), pagesize=(L.PAGE_W * mm, L.PAGE_H * mm))
-            draw_form(c, p)
+            draw_form(c, p, style)
             c.save()
             paths.append(path)
     return paths
