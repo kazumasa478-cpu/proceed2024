@@ -125,3 +125,48 @@ class SettingsTest(unittest.TestCase):
             new = load_config(path)
             self.assertEqual(new["report"]["contact"], "相談先：株式会社proceed YADOLI訪問看護ステーション")
             self.assertEqual(new["report"]["contact_detail"], "")
+
+
+class GroupReportTest(unittest.TestCase):
+    def _results(self, n, dept="訪問看護"):
+        import random
+
+        from pdfeval.organizer import AnswerSheet
+        from pdfeval.forms import Person
+        from pdfeval.questionnaire import ALL_ITEMS, score
+        rng = random.Random(n)
+        out = []
+        for i in range(n):
+            ans = {k: rng.randint(1, 4) for k in ALL_ITEMS}
+            out.append((AnswerSheet(Person(f"E{i}", "x", dept), Path("."), ans, {}), score(ans, CONFIG["criteria"])))
+        return out
+
+    def test_one_page_for_various_sizes(self):
+        import pypdfium2 as pdfium
+
+        from pdfeval.group_report import write_group_report
+        from pdfeval.organizer import AnswerSheet
+        from pdfeval.forms import Person
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = {
+                "zero": [(AnswerSheet(Person("E1", "x", "y"), Path("."), {}, {}), None)],
+                "small": self._results(4),
+                "big": self._results(15) + self._results(6, "事務") + self._results(3, "リハビリ"),
+            }
+            for name, results in cases.items():
+                path = write_group_report(Path(tmp) / f"{name}.pdf", results, 30, CONFIG)
+                doc = pdfium.PdfDocument(str(path))
+                self.assertEqual(len(doc), 1, name)         # 必ずA4・1枚
+                text = doc[0].get_textpage().get_text_range()
+                doc.close()
+                if name == "small":
+                    self.assertIn("10名未満", text)
+                if name == "big":
+                    self.assertIn("人数が少ないため非表示", text)   # 6名・3名の所属は数値を出さない
+
+    def test_judge_scale_scoring(self):
+        from pdfeval.group_report import _judge_score
+        # 「そうだ(1)」ばかり → 量的負担は最大の12点、「ちがう(4)」ばかり → 最小の3点
+        self.assertEqual(_judge_score({"A1": 1, "A2": 1, "A3": 1}, ("A1", "A2", "A3")), 12)
+        self.assertEqual(_judge_score({"A1": 4, "A2": 4, "A3": 4}, ("A1", "A2", "A3")), 3)
+        self.assertIsNone(_judge_score({"A1": 4, "A2": None, "A3": 4}, ("A1", "A2", "A3")))

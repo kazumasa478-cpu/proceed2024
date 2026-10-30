@@ -160,6 +160,8 @@ def build_outputs(base: Path, cfg: dict, roster: dict[str, Person]) -> None:
 
     summary = output / cfg["summary_excel"]
     write_summary(summary, results, cfg)
+    from .group_report import write_group_report
+    group = write_group_report(output / "集団分析結果_A4.pdf", results, len(roster), cfg)
     reports = sorted(output.glob("*/結果通知書_*.pdf"))
     bundle = output / "結果通知書_印刷用_全員分.pdf"
     bundle.unlink(missing_ok=True)
@@ -169,6 +171,7 @@ def build_outputs(base: Path, cfg: dict, roster: dict[str, Person]) -> None:
     log.info("集計: %s（%d名中 %d名の結果確定）", summary.relative_to(base), len(results), done)
     if reports:
         log.info("印刷用: %s（%d枚）", bundle.relative_to(base), len(reports))
+    log.info("集団分析: %s", group.relative_to(base))
     missing = sorted(set(roster) - {s.person.id for s, _ in results})
     if missing:
         log.info("未提出: %d名（%s）", len(missing), ", ".join(missing[:20]) + (" …" if len(missing) > 20 else ""))

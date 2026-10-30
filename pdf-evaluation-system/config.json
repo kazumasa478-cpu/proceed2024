@@ -30,5 +30,7 @@
     "contact": "相談先：株式会社proceed YADOLI訪問看護ステーション",
     "interview_request": "申出先：株式会社proceed YADOLI訪問看護ステーション",
     "contact_detail": ""
-  }
+  },
+  "group_min_size": 10,
+  "_集団分析の説明": "group_min_size 未満の人数の所属は、集団分析で数値を表示しない（個人が特定されないため）"
 }

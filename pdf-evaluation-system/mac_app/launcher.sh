@@ -170,6 +170,7 @@ PY
 
 ・結果通知書_印刷用_全員分.pdf … 本人に渡すA4の結果
 ・ストレスチェック集計.xlsx … 集計と円グラフ
+・集団分析結果_A4.pdf … 集団分析（A4・1枚。この見本は4名のため注意書きが出ます）
 ・鈴木一郎さんは、わざと「2つ塗った」「記入もれ」を入れてあるため「要確認」となり、通知書は作られません（正常な動作です）。
 
 結果は「動作確認_結果」フォルダにあり、本番のデータには影響しません。" >/dev/null
@@ -215,6 +216,7 @@ ${hints[$i]}" "${currents[$i]}") || break
 
 # --- メニュー ---
 M_RUN="スキャンしたPDFを読み取って集計する"
+M_GROUP="集団分析（A4・1枚）を作る"
 M_FORMS="名簿から調査票（印刷用PDF）を作る"
 M_DEMO="動作確認（サンプルで試す）"
 M_ROSTER="名簿を開く（名簿.csv）"
@@ -222,7 +224,7 @@ M_CONFIG="設定を変更する（相談先・連絡先など）"
 M_INBOX="スキャンPDFの置き場所（inbox）を開く"
 M_OUTPUT="結果フォルダ（output）を開く"
 while true; do
-  choice=$(osascript - "$M_RUN" "$M_FORMS" "$M_DEMO" "$M_ROSTER" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
+  choice=$(osascript - "$M_RUN" "$M_GROUP" "$M_FORMS" "$M_DEMO" "$M_ROSTER" "$M_CONFIG" "$M_INBOX" "$M_OUTPUT" <<'OSA' 2>/dev/null
 on run argv
   set r to choose from list argv with title "ストレスチェック集計システム" with prompt "行う作業を選んで「OK」を押してください。" OK button name "OK" cancel button name "終了" default items {item 1 of argv}
   if r is false then return ""
@@ -259,6 +261,23 @@ $SUMMARY
         dialog "調査票を作成できませんでした。名簿.csv（列：ID,氏名,所属）を確認してください。
 
 $SUMMARY" >/dev/null
+      fi ;;
+    "$M_GROUP")
+      if [ ! -d "$BASE/output" ]; then
+        dialog "まだ集計した結果がありません。
+先に「スキャンしたPDFを読み取って集計する」を行ってください。" >/dev/null
+        continue
+      fi
+      run_pdfeval "集団分析" run   # 最新の回答で集計し直してから作る
+      if [ -f "$BASE/output/集団分析結果_A4.pdf" ]; then
+        open "$BASE/output/集団分析結果_A4.pdf"
+        dialog "集団分析（A4・1枚）を作成しました。
+output フォルダの「集団分析結果_A4.pdf」です。
+
+・結果が確定した人（要確認が残っていない人）だけで集計しています
+・10名未満の所属は、個人が特定されないよう数値を表示していません" >/dev/null
+      else
+        dialog "集団分析を作成できませんでした。logs/app.log を確認してください。" >/dev/null
       fi ;;
     "$M_DEMO") demo ;;
     "$M_ROSTER") open "$BASE/名簿.csv" ;;
