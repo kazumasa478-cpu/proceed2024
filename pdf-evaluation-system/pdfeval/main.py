@@ -36,9 +36,14 @@ def load_config(path: Path) -> dict:
     default_path = BASE_DIR / "config.json"
     if not default_path.exists() or default_path.resolve() == path.resolve():
         return cfg
-    defaults = json.loads(default_path.read_text(encoding="utf-8")).get("report", {})
+    all_defaults = json.loads(default_path.read_text(encoding="utf-8"))
+    defaults = all_defaults.get("report", {})
     rep = cfg.setdefault("report", {})
     changed = False
+    for section in ("judgment_chart", "group_min_size"):
+        if section not in cfg and section in all_defaults:
+            cfg[section] = all_defaults[section]
+            changed = True
     for key, value in defaults.items():
         if key not in rep or rep[key] == _OLD_PLACEHOLDERS.get(key):
             rep[key] = value

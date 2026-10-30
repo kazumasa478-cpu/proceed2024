@@ -170,3 +170,46 @@ class GroupReportTest(unittest.TestCase):
         self.assertEqual(_judge_score({"A1": 1, "A2": 1, "A3": 1}, ("A1", "A2", "A3")), 12)
         self.assertEqual(_judge_score({"A1": 4, "A2": 4, "A3": 4}, ("A1", "A2", "A3")), 3)
         self.assertIsNone(_judge_score({"A1": 4, "A2": None, "A3": 4}, ("A1", "A2", "A3")))
+
+
+class JudgmentChartTest(unittest.TestCase):
+    def test_health_risk(self):
+        import math
+
+        from pdfeval.group_report import health_risk
+        self.assertIsNone(health_risk(None, 7, 7))
+        self.assertIsNone(health_risk({"mean_x": 8, "mean_y": None, "coef_x": 0.1, "coef_y": -0.1}, 7, 7))
+        p = {"mean_x": 8.0, "mean_y": 7.0, "coef_x": 0.1, "coef_y": -0.1}
+        self.assertAlmostEqual(health_risk(p, 8.0, 7.0), 100.0)             # 全国平均と同じなら100
+        self.assertAlmostEqual(health_risk(p, 9.0, 7.0), 100 * math.exp(0.1))
+
+    def test_report_with_and_without_values(self):
+        import copy
+
+        import pypdfium2 as pdfium
+
+        from pdfeval.group_report import write_group_report
+        results = GroupReportTest()._results(15)
+        cfg = copy.deepcopy(CONFIG)
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = write_group_report(Path(tmp) / "a.pdf", results, 15, cfg)
+            cfg["judgment_chart"] = {"quantity_control": {"mean_x": 8, "mean_y": 7.5, "coef_x": 0.08, "coef_y": -0.09},
+                                     "support": {"mean_x": 7.5, "mean_y": 8, "coef_x": -0.1, "coef_y": -0.1}}
+            filled = write_group_report(Path(tmp) / "b.pdf", results, 15, cfg)
+            for path, expect in ((plain, "設定に厚生労働省"), (filled, "総合健康リスク")):
+                doc = pdfium.PdfDocument(str(path))
+                self.assertEqual(len(doc), 1)
+                self.assertIn(expect, doc[0].get_textpage().get_text_range())
+                doc.close()
+
+    def test_numeric_setting(self):
+        import json
+
+        from pdfeval.settings import set_setting
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            shutil.copy(ROOT / "config.json", path)
+            self.assertEqual(set_setting(path, "judgment_chart/support/coef_x", "－０．１"), "-0.1")
+            self.assertEqual(json.loads(path.read_text())["judgment_chart"]["support"]["coef_x"], -0.1)
+            with self.assertRaises(ValueError):
+                set_setting(path, "judgment_chart/support/coef_x", "abc")

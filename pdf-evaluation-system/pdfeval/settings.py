@@ -16,7 +16,28 @@ SETTINGS = (
     ("exam_name", "実施名", "", "例：2026年度 ストレスチェック"),
     ("title", "通知書のタイトル", "", "例：ストレスチェック結果のお知らせ"),
 )
+# 判定図の全国平均値・係数（数値。空欄＝未設定）
+NUMERIC = (
+    ("judgment_chart/quantity_control/mean_x", "判定図：仕事の量的負担の全国平均", ""),
+    ("judgment_chart/quantity_control/mean_y", "判定図：仕事のコントロールの全国平均", ""),
+    ("judgment_chart/quantity_control/coef_x", "判定図：仕事の量的負担の係数", "マニュアルの係数（プラス・マイナスに注意）"),
+    ("judgment_chart/quantity_control/coef_y", "判定図：仕事のコントロールの係数", "マニュアルの係数（プラス・マイナスに注意）"),
+    ("judgment_chart/support/mean_x", "判定図：上司の支援の全国平均", ""),
+    ("judgment_chart/support/mean_y", "判定図：同僚の支援の全国平均", ""),
+    ("judgment_chart/support/coef_x", "判定図：上司の支援の係数", "マニュアルの係数（プラス・マイナスに注意）"),
+    ("judgment_chart/support/coef_y", "判定図：同僚の支援の係数", "マニュアルの係数（プラス・マイナスに注意）"),
+)
+_NUMERIC = {k: label for k, label, _ in NUMERIC}
 _BY_KEY = {k: (label, prefix) for k, label, prefix, _ in SETTINGS}
+
+
+def _get_path(cfg: dict, key: str):
+    node = cfg
+    for part in key.split("/"):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
 
 
 def _strip(value: str, prefix: str) -> str:
@@ -26,11 +47,40 @@ def _strip(value: str, prefix: str) -> str:
 def list_settings(cfg: dict) -> list[tuple[str, str, str, str]]:
     """(キー, 名前, 現在の値（頭の文字なし）, 説明) の一覧。"""
     rep = cfg.get("report", {})
-    return [(k, label, _strip(str(rep.get(k, "")), prefix), hint) for k, label, prefix, hint in SETTINGS]
+    rows = [(k, label, _strip(str(rep.get(k, "")), prefix), hint) for k, label, prefix, hint in SETTINGS]
+    for k, label, hint in NUMERIC:
+        v = _get_path(cfg, k)
+        rows.append((k, label, "" if v is None else f"{v:g}",
+                     (hint + "。" if hint else "") + "厚生労働省「仕事のストレス判定図」の値。空欄にすると未設定に戻ります"))
+    return rows
+
+
+def _save(config_path: Path, cfg: dict) -> None:
+    tmp = config_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(config_path)                 # 途中で止まっても設定が壊れないよう、書き終えてから置き換える
 
 
 def set_setting(config_path: Path, key: str, value: str) -> str:
     """1項目を変更して config.json に保存し、保存した値を返す。"""
+    if key in _NUMERIC:
+        text = value.strip().replace("−", "-").replace("ー", "-").replace("－", "-").replace("．", ".")
+        text = text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+        if text:
+            try:
+                number = float(text)
+            except ValueError:
+                raise ValueError(f"数字で入力してください（例：7.5、-0.05）：{value}")
+        else:
+            number = None
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        node = cfg
+        parts = key.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = number
+        _save(config_path, cfg)
+        return "（未設定）" if number is None else f"{number:g}"
     if key not in _BY_KEY:
         raise ValueError(f"変更できない項目です: {key}")
     _, prefix = _BY_KEY[key]
@@ -38,7 +88,5 @@ def set_setting(config_path: Path, key: str, value: str) -> str:
     value = _strip(value, prefix)
     cfg = json.loads(config_path.read_text(encoding="utf-8"))
     cfg.setdefault("report", {})[key] = (prefix + value) if (prefix and value) else value
-    tmp = config_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(config_path)                 # 途中で止まっても設定が壊れないよう、書き終えてから置き換える
+    _save(config_path, cfg)
     return cfg["report"][key]

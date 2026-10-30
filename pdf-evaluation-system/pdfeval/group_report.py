@@ -73,6 +73,107 @@ def _pie(cv: _Canvas, cx: float, cy: float, r: float, parts: list[tuple[str, int
         ly += 4
 
 
+def health_risk(params: dict | None, xv: float, yv: float) -> float | None:
+    """判定図の健康リスク（全国平均=100）。係数・全国平均が設定されていなければ None。"""
+    import math
+    if not params or any(params.get(k) is None for k in ("mean_x", "mean_y", "coef_x", "coef_y")):
+        return None
+    return 100 * math.exp(params["coef_x"] * (xv - params["mean_x"]) + params["coef_y"] * (yv - params["mean_y"]))
+
+
+def _judge_chart(cv: _Canvas, x0: float, y0: float, title: str, xlabel: str, ylabel: str,
+                 points: list[tuple[str, float, float, bool]], params: dict | None) -> None:
+    """仕事のストレス判定図（散布図）。points: (名前, x, y, 全体か)。
+
+    係数・全国平均が設定されていれば、全国平均の点と健康リスク 100/120/150 の線も描く。
+    """
+    import math
+    c = cv.c
+    lo, hi = 3, 12
+    px, py, pw, ph = x0 + 9, y0 + 6, 46, 34           # 描画域（mm）
+    cv.text(x0, y0 + 3.5, title, size=8.5)
+
+    def X(v): return (px + (v - lo) / (hi - lo) * pw) * mm
+    def Y(v): return cv.y(py + ph - (v - lo) / (hi - lo) * ph)
+
+    c.setFillColor(HexColor("#FAFAFA"))
+    c.rect(px * mm, cv.y(py + ph), pw * mm, ph * mm, stroke=0, fill=1)
+    c.setLineWidth(0.2)
+    for v in range(lo, hi + 1):
+        c.setStrokeGray(0.85)
+        c.line(X(v), Y(lo), X(v), Y(hi))
+        c.line(X(lo), Y(v), X(hi), Y(v))
+        if v % 3 == 0:
+            cv.text(px + (v - lo) / (hi - lo) * pw, py + ph + 3, str(v), size=6, center=True, gray=0.4)
+            cv.text(px - 2.5, py + ph - (v - lo) / (hi - lo) * ph + 0.8, str(v), size=6, center=True, gray=0.4)
+    c.setStrokeGray(0.4)
+    c.setLineWidth(0.5)
+    c.rect(px * mm, cv.y(py + ph), pw * mm, ph * mm, stroke=1, fill=0)
+    cv.text(px + pw / 2, py + ph + 6.3, xlabel, size=7, center=True)
+    c.saveState()
+    c.translate((x0 + 1.5) * mm, cv.y(py + ph / 2))
+    c.rotate(90)
+    c.setFont(FONT, 7)
+    c.setFillGray(0)
+    c.drawCentredString(0, 0, ylabel)
+    c.restoreState()
+
+    if health_risk(params, 0, 0) is not None:
+        # 健康リスクが等しくなる線： a(x-A) + b(y-B) = ln(R/100)
+        a, b, A, B = params["coef_x"], params["coef_y"], params["mean_x"], params["mean_y"]
+        for risk, color in ((100, HexColor("#888888")), (120, MID), (150, HIGH)):
+            pts = []
+            for k in range(0, 91):
+                xv = lo + (hi - lo) * k / 90
+                yv = B + (math.log(risk / 100) - a * (xv - A)) / b if b else None
+                if yv is not None and lo <= yv <= hi:
+                    pts.append((X(xv), Y(yv)))
+            if len(pts) > 1:
+                c.setStrokeColor(color)
+                c.setLineWidth(0.6)
+                c.setDash(2, 1.5)
+                path = c.beginPath()
+                path.moveTo(*pts[0])
+                for q in pts[1:]:
+                    path.lineTo(*q)
+                c.drawPath(path, stroke=1, fill=0)
+                c.setDash()
+                lx, ly = pts[-1]
+                c.setFillColor(color)
+                c.setFont(FONT, 5.5)
+                c.drawRightString(lx - 0.6 * mm, ly + 0.8 * mm, str(risk))
+        # 全国平均の点（×印）
+        c.setStrokeColor(HexColor("#444444"))
+        c.setLineWidth(0.8)
+        d = 1.3 * mm
+        c.line(X(A) - d, Y(B) - d, X(A) + d, Y(B) + d)
+        c.line(X(A) - d, Y(B) + d, X(A) + d, Y(B) - d)
+
+    for label, xv, yv, total in points:
+        r = (1.6 if total else 1.1) * mm
+        c.setFillColor(HIGH if total else HexColor("#3B6EA5"))
+        c.setStrokeColor(white)
+        c.setLineWidth(0.4)
+        c.circle(X(xv), Y(yv), r, stroke=1, fill=1)
+        if not total:
+            c.setFillColor(HexColor("#3B6EA5"))
+            c.setFont(FONT, 5.5)
+            c.drawString(X(xv) + r + 0.5 * mm, Y(yv) - 0.6 * mm, label[:6])
+
+    # 右側に数値
+    tx, ty = px + pw + 3, py + 2
+    for label, xv, yv, total in points[:6]:
+        risk = health_risk(params, xv, yv)
+        cv.text(tx, ty + 2.5, ("● " if total else "・") + label[:7], size=6.8,
+                gray=0 if total else 0.25)
+        cv.text(tx + 2, ty + 5.8, f"{xv:.1f} / {yv:.1f}" + (f"　リスク{risk:.0f}" if risk else ""), size=6.3,
+                gray=0.35)
+        ty += 7.2
+    if health_risk(params, 0, 0) is not None:
+        cv.text(tx, ty + 2.5, "× 全国平均", size=6.3, gray=0.35)
+        cv.text(tx, ty + 5.8, "線：健康リスク", size=6.3, gray=0.35)
+
+
 def _tile(cv: _Canvas, x: float, y: float, w: float, h: float, label: str, value: str, sub: str = "",
           color=None) -> None:
     c = cv.c
@@ -134,8 +235,8 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
 
     # --- 円グラフ（判定・ストレス反応の分布）と、領域ごとの平均 ---
     b_levels = Counter(scale_level(r.b / DOMAINS["B"][1], th) for _, r in done)
-    _pie(cv, left + 22, y + 22, 15, [("高ストレス者", high, HIGH), ("該当しない", n - high, OK)], "高ストレス者の割合")
-    _pie(cv, left + 72, y + 22, 15, [("良好", b_levels["良好"], OK), ("ふつう", b_levels["ふつう"], MID),
+    _pie(cv, left + 22, y + 20, 13, [("高ストレス者", high, HIGH), ("該当しない", n - high, OK)], "高ストレス者の割合")
+    _pie(cv, left + 72, y + 20, 13, [("良好", b_levels["良好"], OK), ("ふつう", b_levels["ふつう"], MID),
                                        ("要注意", b_levels["要注意"], HIGH)], "心身のストレス反応の分布")
     bx, bw = left + 108, width - 108
     cv.text(bx, y + 4, "領域ごとの平均（ストレスの高さ）", size=9.5)
@@ -154,7 +255,7 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
         _chip(cv, bx + bw - 13, yy - 0.2, level)
         yy += 7.5
     cv.text(bx, yy + 2.5, "0%＝最もストレスが低い、100%＝最も高い", size=6.5, gray=0.4)
-    y += 54
+    y += 47
 
     # --- 項目別（19尺度）の平均 ---
     cv.text(left, y + 4, "■ 項目別の平均（ストレスの高さ 1.0〜4.0。2.0以下=良好、3.0以上=要注意）", size=9.5)
@@ -170,9 +271,9 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
         x0, yy, prev = left + col * (half_w + 6), y, None
         for dom, name, avg in group:
             if dom != prev:
-                cv.rect(x0, yy, half_w, 4.6, fill_gray=0.9, stroke_gray=0.9)
-                cv.text(x0 + 1.5, yy + 3.4, dom_names[dom], size=7.5)
-                yy += 5.0
+                cv.rect(x0, yy, half_w, 4.2, fill_gray=0.9, stroke_gray=0.9)
+                cv.text(x0 + 1.5, yy + 3.1, dom_names[dom], size=7.2)
+                yy += 4.5
                 prev = dom
             level = scale_level(avg, th)
             cv.text(x0 + 2, yy + 3.3, name, size=8)
@@ -182,26 +283,55 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
                 c.setFillColor(LEVEL_COLOR[level])
                 c.rect(bar_x * mm, cv.y(yy + 3.8), bar_w * (avg - 1) / 3 * mm, 2.8 * mm, stroke=0, fill=1)
             cv.text(bar_x + bar_w + 1.5, yy + 3.3, f"{avg:.1f}" if avg else "－", size=7.5)
-            _chip(cv, x0 + half_w - 13, yy - 0.4, level)
-            yy += 4.9
+            _chip(cv, x0 + half_w - 13, yy - 0.5, level)
+            yy += 4.5
         bottom = max(bottom, yy)
     y = bottom + 3
 
-    # --- 仕事のストレス判定図の4尺度 ---
-    cv.text(left, y + 4, "■ 仕事のストレス判定図の4尺度（集団の平均点。各3〜12点）", size=9.5)
-    y += 6.5
-    jw = width / 4
-    for i, (name, items, hint) in enumerate(JUDGE_SCALES):
-        vals = [v for s, _ in done if (v := _judge_score(s.answers, items)) is not None]
-        x0 = left + i * jw
-        c.setFillColor(TILE)
-        c.roundRect((x0 + 0.5) * mm, cv.y(y + 13), (jw - 1) * mm, 13 * mm, 1.2 * mm, stroke=0, fill=1)
-        cv.text(x0 + 2.5, y + 4.2, name, size=8)
-        c.setFillColorRGB(0.13, 0.13, 0.13)
-        c.setFont(FONT, 13)
-        c.drawString((x0 + 2.5) * mm, cv.y(y + 10.5), f"{mean(vals):.1f}点" if vals else "－")
-        cv.text(x0 + 21, y + 10.3, hint, size=6.5, gray=0.4)
-    y += 16
+    # --- 仕事のストレス判定図（量-コントロール判定図・職場の支援判定図） ---
+    jc = cfg.get("judgment_chart", {})
+    qc_params, sp_params = jc.get("quantity_control"), jc.get("support")
+    configured = health_risk(qc_params, 0, 0) is not None and health_risk(sp_params, 0, 0) is not None
+    cv.text(left, y + 4, "■ 仕事のストレス判定図（集団の平均点。各3〜12点）", size=9.5)
+    y += 5.5
+
+    def judge_means(sheets) -> dict[str, float] | None:
+        out = {}
+        for name, items, _ in JUDGE_SCALES:
+            vals = [v for s in sheets if (v := _judge_score(s.answers, items)) is not None]
+            if not vals:
+                return None
+            out[name] = mean(vals)
+        return out
+
+    groups = [("全体", [s for s, _ in done], True)]
+    dept_sheets: dict[str, list] = {}
+    for s_, _ in done:
+        dept_sheets.setdefault(s_.person.dept or "（所属なし）", []).append(s_)
+    groups += [(d, ss, False) for d, ss in sorted(dept_sheets.items(), key=lambda kv: -len(kv[1]))
+               if len(ss) >= min_n and len(dept_sheets) > 1]
+    jm = {name: m for name, ss, _ in groups if (m := judge_means(ss))}
+    qc_points = [(name, jm[name]["仕事の量的負担"], jm[name]["仕事のコントロール"], tot)
+                 for name, _, tot in groups if name in jm]
+    sp_points = [(name, jm[name]["上司の支援"], jm[name]["同僚の支援"], tot)
+                 for name, _, tot in groups if name in jm]
+    cw = (width - 4) / 2
+    _judge_chart(cv, left, y, "量−コントロール判定図", "仕事の量的負担（右ほど負担大）",
+                 "コントロール（上ほど裁量大）", qc_points, qc_params)
+    _judge_chart(cv, left + cw + 4, y, "職場の支援判定図", "上司の支援（右ほど支援大）",
+                 "同僚の支援（上ほど支援大）", sp_points, sp_params)
+    y += 49
+    total_risk = None
+    if configured and "全体" in jm:
+        ra = health_risk(qc_params, jm["全体"]["仕事の量的負担"], jm["全体"]["仕事のコントロール"])
+        rb = health_risk(sp_params, jm["全体"]["上司の支援"], jm["全体"]["同僚の支援"])
+        total_risk = ra * rb / 100
+        cv.text(left, y + 1, f"総合健康リスク（全体）：{total_risk:.0f}　（量−コントロール {ra:.0f} × 職場の支援 {rb:.0f} ÷ 100。全国平均＝100）",
+                size=8, gray=0.15)
+    else:
+        cv.text(left, y + 1, "※全国平均・健康リスクの線は、設定に厚生労働省「仕事のストレス判定図」の全国平均値と係数を入れると表示されます。",
+                size=7, gray=0.4)
+    y += 3
 
     # --- 所属別 ---
     cv.text(left, y + 4, f"■ 所属別（{min_n}名未満の所属は、個人が特定されないよう数値を表示しません）", size=9.5)
@@ -221,7 +351,7 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
             cv.text(x0 + 1.5, y + (3.0 if len(lines) == 2 else 4.4) + k * 3.0, line, size=6.8)
     y += 6.5
     rows = sorted(by_dept.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-    max_rows = 6
+    max_rows = 5
     for dept, rs in rows[:max_rows]:
         cv.text(xs[0] + 1.5, y + 3.6, dept[:16], size=7.5)
         cv.text(xs[1] + 1.5, y + 3.6, f"{len(rs)}名", size=7.5)

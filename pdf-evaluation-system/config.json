@@ -32,5 +32,20 @@
     "contact_detail": ""
   },
   "group_min_size": 10,
-  "_集団分析の説明": "group_min_size 未満の人数の所属は、集団分析で数値を表示しない（個人が特定されないため）"
+  "_集団分析の説明": "group_min_size 未満の人数の所属は、集団分析で数値を表示しない（個人が特定されないため）",
+  "judgment_chart": {
+    "_説明": "厚生労働省「仕事のストレス判定図」の全国平均値と係数。入れると判定図に全国平均・健康リスクの線と値が出る（アプリの「設定を変更する」から入力できる）",
+    "quantity_control": {
+      "mean_x": null,
+      "mean_y": null,
+      "coef_x": null,
+      "coef_y": null
+    },
+    "support": {
+      "mean_x": null,
+      "mean_y": null,
+      "coef_x": null,
+      "coef_y": null
+    }
+  }
 }
