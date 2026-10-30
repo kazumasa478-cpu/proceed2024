@@ -9,6 +9,8 @@ from pathlib import Path
 
 # (キー, 画面に出す名前, 通知書での頭の文字, 入力の説明)
 SETTINGS = (
+    ("company_name", "会社名", "", "集団分析の見出しに載ります（例：株式会社〇〇）。空欄なら載りません"),
+    ("group_label", "所属の呼び方", "", "集団分析での呼び方（例：所属、部署、事業所、課）"),
     ("contact", "相談先", "相談先：", "結果通知書の下に載る相談先の名前"),
     ("contact_detail", "連絡先（電話・メールなど）", "", "相談先・申出先の後ろに（ ）で載ります。空欄なら載りません"),
     ("interview_request", "医師面接の申出先", "申出先：", "高ストレス者の通知書に載る申出先"),
@@ -90,3 +92,28 @@ def set_setting(config_path: Path, key: str, value: str) -> str:
     cfg.setdefault("report", {})[key] = (prefix + value) if (prefix and value) else value
     _save(config_path, cfg)
     return cfg["report"][key]
+
+
+# ---------- 集団分析での所属のまとめ方（会社ごとに設定） ----------
+def group_label(cfg: dict) -> str:
+    return str(cfg.get("report", {}).get("group_label") or "所属").strip() or "所属"
+
+
+def group_of(dept: str, cfg: dict) -> str:
+    """名簿の所属を、集団分析で使う名前に置き換える（まとめ方が設定されていなければそのまま）。"""
+    dept = (dept or "").strip()
+    mapped = str(cfg.get("group_map", {}).get(dept, "")).strip()
+    return mapped or dept or f"（{group_label(cfg)}なし）"
+
+
+def set_group(config_path: Path, dept: str, value: str) -> str:
+    """名簿の所属 dept を、集団分析で value にまとめる。value が空なら元に戻す。"""
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    gm = cfg.setdefault("group_map", {})
+    value = " ".join(value.split())
+    if value and value != dept:
+        gm[dept] = value
+    else:
+        gm.pop(dept, None)
+    _save(config_path, cfg)
+    return value or dept

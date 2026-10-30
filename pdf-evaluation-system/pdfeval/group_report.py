@@ -19,6 +19,7 @@ from . import layout as L
 from .forms import FONT, _Canvas
 from .questionnaire import DOMAINS, SCALES, Result, scale_level
 from .report_pdf import LEVEL_COLOR, _chip, _wrap
+from .settings import group_label, group_of
 
 HIGH = HexColor("#C8553D")
 OK = HexColor("#2E8B7A")
@@ -199,12 +200,16 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
     high = sum(r.high_stress for _, r in done)
 
     c = canvas.Canvas(str(path), pagesize=(L.PAGE_W * mm, L.PAGE_H * mm))
-    c.setTitle("ストレスチェック 集団分析結果")
+    company = str(rep.get("company_name", "")).strip()
+    label = group_label(cfg)
+    c.setTitle(f"{company} ストレスチェック 集団分析結果".strip())
     cv = _Canvas(c)
     left, right = 14.0, L.PAGE_W - 14.0
     width = right - left
 
     # --- 見出し ---
+    if company:
+        cv.text(left, 12.5, company, size=10)
     cv.text(left, 20, "ストレスチェック 集団分析結果", size=17)
     cv.text(right - 62, 14, f"実施：{rep.get('exam_name', '')}", size=8)
     cv.text(right - 62, 19, f"作成日：{date.today():%Y年%m月%d日}", size=8)
@@ -307,7 +312,7 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
     groups = [("全体", [s for s, _ in done], True)]
     dept_sheets: dict[str, list] = {}
     for s_, _ in done:
-        dept_sheets.setdefault(s_.person.dept or "（所属なし）", []).append(s_)
+        dept_sheets.setdefault(group_of(s_.person.dept, cfg), []).append(s_)
     groups += [(d, ss, False) for d, ss in sorted(dept_sheets.items(), key=lambda kv: -len(kv[1]))
                if len(ss) >= min_n and len(dept_sheets) > 1]
     jm = {name: m for name, ss, _ in groups if (m := judge_means(ss))}
@@ -334,12 +339,12 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
     y += 3
 
     # --- 所属別 ---
-    cv.text(left, y + 4, f"■ 所属別（{min_n}名未満の所属は、個人が特定されないよう数値を表示しません）", size=9.5)
+    cv.text(left, y + 4, f"■ {label}別（{min_n}名未満の{label}は、個人が特定されないよう数値を表示しません）", size=9.5)
     y += 6.5
     by_dept: dict[str, list[Result]] = {}
     for s, r in done:
-        by_dept.setdefault(s.person.dept or "（所属なし）", []).append(r)
-    cols = [("所属", 44), ("人数", 14), ("高ストレス者", 22), ("仕事の\nストレス要因", 24),
+        by_dept.setdefault(group_of(s.person.dept, cfg), []).append(r)
+    cols = [(label, 44), ("人数", 14), ("高ストレス者", 22), ("仕事の\nストレス要因", 24),
             ("心身の\nストレス反応", 24), ("周囲の\nサポート", 22), ("最も高い項目", width - 150)]
     xs = [left]
     for _, w in cols:
@@ -368,7 +373,7 @@ def write_group_report(path: Path, results: list[tuple[object, Result | None]], 
         cv.line(left, y + 5.2, right, y + 5.2, gray=0.85, width=0.3)
         y += 5.2
     if len(rows) > max_rows:
-        cv.text(left + 1.5, y + 3.4, f"ほか {len(rows) - max_rows} 所属は「ストレスチェック集計.xlsx」を参照してください。", size=7, gray=0.4)
+        cv.text(left + 1.5, y + 3.4, f"ほか {len(rows) - max_rows} {label}は「ストレスチェック集計.xlsx」を参照してください。", size=7, gray=0.4)
         y += 4.6
     if not rows:
         cv.text(left + 1.5, y + 3.6, "結果が確定した受検者がいません。", size=7.5, gray=0.45)

@@ -24,6 +24,8 @@
     "ambiguous_ratio": 0.5
   },
   "report": {
+    "company_name": "",
+    "group_label": "所属",
     "title": "ストレスチェック結果のお知らせ",
     "exam_name": "2026年度 ストレスチェック",
     "implementer": "実施者：〇〇クリニック 産業医 〇〇 〇〇",
@@ -47,5 +49,7 @@
       "coef_x": null,
       "coef_y": null
     }
-  }
+  },
+  "group_map": {},
+  "_所属のまとめ方の説明": "group_map は 名簿の所属名 から 集団分析で使う名前 への対応。アプリの設定画面から変更できる"
 }

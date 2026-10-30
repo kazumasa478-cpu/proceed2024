@@ -213,3 +213,42 @@ class JudgmentChartTest(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())["judgment_chart"]["support"]["coef_x"], -0.1)
             with self.assertRaises(ValueError):
                 set_setting(path, "judgment_chart/support/coef_x", "abc")
+
+
+class CompanyGroupingTest(unittest.TestCase):
+    def test_group_mapping_and_label(self):
+        import copy
+        import json
+
+        import pypdfium2 as pdfium
+
+        from pdfeval.group_report import write_group_report
+        from pdfeval.settings import group_of, set_group, set_setting
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            shutil.copy(ROOT / "config.json", path)
+            set_group(path, "リハビリ", "医療部")
+            set_group(path, "訪問看護", " 医療部 ")
+            set_setting(path, "company_name", "株式会社テスト")
+            set_setting(path, "group_label", "部署")
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(group_of("リハビリ", cfg), "医療部")
+            self.assertEqual(group_of("事務", cfg), "事務")
+            self.assertEqual(group_of("", cfg), "（部署なし）")
+            set_group(path, "リハビリ", "")                       # 空欄で元に戻る
+            self.assertNotIn("リハビリ", json.loads(path.read_text(encoding="utf-8"))["group_map"])
+
+            # 8名＋6名は単独では非表示だが、まとめると14名で数値が出る
+            cfg = copy.deepcopy(CONFIG)
+            cfg["report"].update(company_name="株式会社テスト", group_label="部署")
+            cfg["group_map"] = {"リハビリ": "医療部", "訪問看護": "医療部"}
+            t = GroupReportTest()
+            results = t._results(8, "リハビリ") + t._results(6, "訪問看護")
+            pdf = write_group_report(Path(tmp) / "g.pdf", results, 14, cfg)
+            doc = pdfium.PdfDocument(str(pdf))
+            text = doc[0].get_textpage().get_text_range()
+            doc.close()
+            self.assertIn("株式会社テスト", text)
+            self.assertIn("部署別", text)
+            self.assertIn("医療部", text)
+            self.assertNotIn("人数が少ないため非表示", text)

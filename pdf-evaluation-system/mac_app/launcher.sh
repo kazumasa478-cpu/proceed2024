@@ -176,8 +176,42 @@ PY
 結果は「動作確認_結果」フォルダにあり、本番のデータには影響しません。" >/dev/null
 }
 
+# --- 集団分析での所属のまとめ方（会社ごと） ---
+groups_menu() {
+  while true; do
+    local depts=() counts=() mapped=() items=() d n m
+    while IFS=$'\x1f' read -r d n m; do
+      [ -n "$d" ] || continue
+      depts+=("$d"); counts+=("$n"); mapped+=("$m")
+      if [ "$d" = "$m" ]; then items+=("$d（${n}名）"); else items+=("$d（${n}名）→ $m"); fi
+    done < <("$PY" -m pdfeval groups-list --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+    if [ ${#items[@]} -eq 0 ]; then
+      dialog "名簿に所属が入っていません。名簿.csv の「所属」の列を確認してください。" >/dev/null
+      return
+    fi
+    local pick i
+    pick=$(choose "名簿の所属を、集団分析でどうまとめるか決めます。
+10名未満の所属は数値が出ないので、近い所属どうしをまとめると分析結果を出せます。
+変更したい所属を選んでください。" "${items[@]}")
+    [ -n "$pick" ] || return
+    for i in "${!items[@]}"; do
+      [ "${items[$i]}" = "$pick" ] || continue
+      local cur="${mapped[$i]}" new
+      [ "$cur" = "${depts[$i]}" ] && cur=""
+      new=$(ask_text "名簿の所属「${depts[$i]}」（${counts[$i]}名）を、集団分析でどの名前にまとめますか？
+・ほかの所属と同じ名前にすると、合わせて集計します（例：医療部）
+・空欄にすると、元の「${depts[$i]}」のまま集計します" "$cur") || break
+      dialog "$("$PY" -m pdfeval groups-set --name "${depts[$i]}" --value "$new" --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
+
+集団分析の書類は、メニューの「集団分析（A4・1枚）を作る」で作り直されます。" >/dev/null
+      break
+    done
+  done
+}
+
 # --- 設定（相談先など）をアプリの画面で変更する ---
 settings_menu() {
+  local P_GROUPS="▶ 所属のまとめ方を変更する（集団分析用）"
   local P_PREVIEW="▶ 結果通知書の見本を見る（今の設定で作成）"
   local P_FILE="▶ 設定ファイルを直接開く（上級者向け）"
   while true; do
@@ -188,9 +222,10 @@ settings_menu() {
       items+=("$l：${c:-（未設定）}")
     done < <("$PY" -m pdfeval settings-list --config "$BASE/config.json" --base "$BASE" 2>>"$LOG")
     local pick
-    pick=$(choose "変更したい項目を選んでください。結果通知書に載る内容です。" "${items[@]}" "$P_PREVIEW" "$P_FILE")
+    pick=$(choose "変更したい項目を選んでください。" "${items[@]}" "$P_GROUPS" "$P_PREVIEW" "$P_FILE")
     case "$pick" in
       "") return ;;
+      "$P_GROUPS") groups_menu ;;
       "$P_PREVIEW")
         local out
         out=$("$PY" -m pdfeval preview-report --config "$BASE/config.json" --base "$BASE" 2>>"$LOG" | tail -1)

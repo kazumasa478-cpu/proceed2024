@@ -40,7 +40,7 @@ def load_config(path: Path) -> dict:
     defaults = all_defaults.get("report", {})
     rep = cfg.setdefault("report", {})
     changed = False
-    for section in ("judgment_chart", "group_min_size"):
+    for section in ("judgment_chart", "group_min_size", "group_map"):
         if section not in cfg and section in all_defaults:
             cfg[section] = all_defaults[section]
             changed = True
@@ -65,6 +65,22 @@ def cmd_settings(config_path: Path, cfg: dict, action: str, key: str, value: str
         print(e)
         return 1
     print(f"保存しました：{saved or '（空欄）'}")
+    return 0
+
+
+def cmd_groups(base: Path, config_path: Path, cfg: dict, action: str, name: str, value: str) -> int:
+    """集団分析での所属のまとめ方。list の出力は 名簿の所属␟人数␟まとめた名前。"""
+    from collections import Counter
+
+    from .settings import group_of, set_group
+    if action == "list":
+        counts = Counter((p.dept or "").strip() for p in _roster(base, cfg).values())
+        for dept, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            if dept:
+                print("\x1f".join((dept, str(n), group_of(dept, cfg))))
+        return 0
+    saved = set_group(config_path, name.strip(), value)
+    print(f"集団分析では「{name.strip()}」を「{saved}」として集計します")
     return 0
 
 
@@ -193,13 +209,15 @@ def cmd_run(base: Path, cfg: dict) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pdfeval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "settings-list", "settings-set", "preview-report"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "forms", "settings-list", "settings-set", "preview-report",
+                                 "groups-list", "groups-set"])
     parser.add_argument("--config", type=Path, default=BASE_DIR / "config.json")
     parser.add_argument("--base", type=Path, default=None,
                         help="名簿・inbox・output を置く基準フォルダ (既定: 設定ファイルと同じ場所)")
     parser.add_argument("--separate", action="store_true", help="forms: 1人1ファイルで出力する")
     parser.add_argument("--key", default="", help="settings-set: 変更する項目")
-    parser.add_argument("--value", default="", help="settings-set: 新しい値")
+    parser.add_argument("--value", default="", help="settings-set / groups-set: 新しい値")
+    parser.add_argument("--name", default="", help="groups-set: 名簿の所属名")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
 
@@ -216,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_forms(base, cfg, args.separate)
     if args.command.startswith("settings-"):
         return cmd_settings(args.config, cfg, args.command[len("settings-"):], args.key, args.value)
+    if args.command.startswith("groups-"):
+        return cmd_groups(base, args.config, cfg, args.command[len("groups-"):], args.name, args.value)
     if args.command == "preview-report":
         return cmd_preview(base, cfg)
     return cmd_run(base, cfg)

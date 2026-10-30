@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .organizer import AnswerSheet
+from .settings import group_label, group_of
 from .questionnaire import ALL_ITEMS, DOMAINS, SCALES, Result, item_label, scale_level
 
 HEADER_FILL = PatternFill("solid", fgColor="DDEBF7")
@@ -84,12 +85,13 @@ def write_summary(path: Path, results: list[tuple[AnswerSheet, Result | None]], 
     # 所属別（集団分析の目安。人数が少ない所属は個人が特定されるおそれがあるので注意）
     by_dept: dict[str, list[Result]] = {}
     for s, r in done:
-        by_dept.setdefault(s.person.dept or "（所属なし）", []).append(r)
+        by_dept.setdefault(group_of(s.person.dept, cfg), []).append(r)
     dept_rows = [[d, len(rs), sum(r.high_stress for r in rs),
                   round(sum(r.a for r in rs) / len(rs), 1), round(sum(r.b for r in rs) / len(rs), 1),
                   round(sum(r.c for r in rs) / len(rs), 1)] for d, rs in sorted(by_dept.items())]
-    _table(ws, 36, 1, ["所属", "人数", "高ストレス者", "平均A", "平均B", "平均C"], dept_rows)
-    ws.cell(row=35, column=1, value="所属別（10人未満の集団は個人が特定されやすいため取扱注意）").font = Font(bold=True)
+    label = group_label(cfg)
+    _table(ws, 36, 1, [label, "人数", "高ストレス者", "平均A", "平均B", "平均C"], dept_rows)
+    ws.cell(row=35, column=1, value=f"{label}別（10人未満の集団は個人が特定されやすいため取扱注意）").font = Font(bold=True)
     for col, w in {"A": 26, "B": 10, "C": 12, "D": 9, "E": 9, "F": 9}.items():
         ws.column_dimensions[col].width = w
 
